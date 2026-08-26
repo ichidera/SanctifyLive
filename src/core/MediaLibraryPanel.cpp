@@ -1,12 +1,15 @@
 #include "MediaLibraryPanel.h"
 
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
-#include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMessageBox>
 #include <QPainter>
+#include <QPainterPath>
 #include <QSplitter>
 #include <QTabWidget>
 #include <QToolButton>
@@ -35,7 +38,31 @@ QPixmap makeSwatch(const QColor &color, int size)
     return pixmap;
 }
 
-// A category header row ("MEDIA", "ONLINE", "COLLECTIONS") -- visible for
+// Cover-fit crop of a real imported image into a square thumbnail, with
+// the same rounded-corner treatment as the placeholder swatches so the
+// grid looks consistent regardless of where an entry came from.
+QPixmap makeImageThumbnail(const QString &path, int size)
+{
+    QPixmap source(path);
+    if (source.isNull())
+        return makeSwatch(QColor("#555555"), size);
+
+    const QPixmap scaled = source.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    const QRect cropRect((scaled.width() - size) / 2, (scaled.height() - size) / 2, size, size);
+    const QPixmap cropped = scaled.copy(cropRect);
+
+    QPixmap rounded(size, size);
+    rounded.fill(Qt::transparent);
+    QPainter painter(&rounded);
+    painter.setRenderHint(QPainter::Antialiasing);
+    QPainterPath clip;
+    clip.addRoundedRect(QRectF(0.5, 0.5, size - 1, size - 1), 4, 4);
+    painter.setClipPath(clip);
+    painter.drawPixmap(0, 0, cropped);
+    return rounded;
+}
+
+// A category header row ("MEDIA", "COLLECTIONS") -- visible for
 // grouping, but not itself a selectable/clickable category.
 QTreeWidgetItem *makeSectionHeader(QTreeWidget *tree, const QString &text)
 {
@@ -54,6 +81,32 @@ QTreeWidgetItem *makeCategory(QTreeWidgetItem *parent, const QString &text, cons
     auto *item = new QTreeWidgetItem(parent, {text});
     item->setIcon(0, icon);
     return item;
+}
+
+// Categories that plausibly mean "a file on disk" for import purposes.
+// Feeds/DVD don't map to a simple file picker, so import falls back to
+// a generic "any file" dialog for those rather than being hidden --
+// consistent with the request that the "+" import control show up the
+// same way in every category.
+QString fileFilterForCategory(const QString &category)
+{
+    if (category == QObject::tr("Images"))
+        return QObject::tr("Images (*.png *.jpg *.jpeg *.bmp *.gif);;All Files (*)");
+    if (category == QObject::tr("Videos"))
+        return QObject::tr("Videos (*.mp4 *.mov *.avi *.mkv *.webm);;All Files (*)");
+    if (category == QObject::tr("Audio"))
+        return QObject::tr("Audio (*.mp3 *.wav *.ogg *.flac);;All Files (*)");
+    return QObject::tr("All Files (*)");
+}
+
+// A stable, arbitrary color derived from the filename, purely so
+// imported non-image files (video/audio/etc., which we can't thumbnail
+// yet) get visually distinct placeholder swatches instead of all
+// looking identical.
+QColor colorFromName(const QString &name)
+{
+    const uint hash = qHash(name);
+    return QColor::fromHsv(hash % 360, 130, 190);
 }
 }
 
@@ -86,9 +139,6 @@ MediaLibraryPanel::MediaLibraryPanel(QWidget *parent) : QWidget(parent)
     makeCategory(mediaSection, tr("DVD"), IconFactory::treeDvd());
     makeCategory(mediaSection, tr("Audio"), IconFactory::treeAudio());
 
-    QTreeWidgetItem *onlineSection = makeSectionHeader(m_categoryTree, tr("ONLINE"));
-    makeCategory(onlineSection, tr("Premium Media"), IconFactory::treePremium());
-
     QTreeWidgetItem *collectionsSection = makeSectionHeader(m_categoryTree, tr("COLLECTIONS"));
     auto *noCollectionsYet = new QTreeWidgetItem(collectionsSection, {tr("No collections yet")});
     noCollectionsYet->setFlags(noCollectionsYet->flags() & ~Qt::ItemIsSelectable & ~Qt::ItemIsEnabled);
@@ -97,14 +147,27 @@ MediaLibraryPanel::MediaLibraryPanel(QWidget *parent) : QWidget(parent)
     noCollectionsYet->setFont(0, italic);
 
     m_categoryTree->expandItem(mediaSection);
-    m_categoryTree->expandItem(onlineSection);
     m_categoryTree->collapseItem(collectionsSection);
     connect(m_categoryTree, &QTreeWidget::itemClicked, this, &MediaLibraryPanel::onCategorySelected);
+
+    // Import control -- deliberately the same "+" button regardless of
+    // which category is selected; only its tooltip/filter changes.
+    m_importButton = new QToolButton(mediaTab);
+    m_importButton->setText(QStringLiteral("+"));
+    m_importButton->setToolTip(tr("Import files into this category"));
+    connect(m_importButton, &QToolButton::clicked, this, &MediaLibraryPanel::onImportClicked);
+
+    auto *treeFooterLayout = new QHBoxLayout();
+    treeFooterLayout->setContentsMargins(2, 2, 2, 2);
+    treeFooterLayout->addWidget(m_importButton);
+    treeFooterLayout->addStretch(1);
 
     auto *treePanel = new QWidget(mediaTab);
     auto *treePanelLayout = new QVBoxLayout(treePanel);
     treePanelLayout->setContentsMargins(0, 0, 0, 0);
-    treePanelLayout->addWidget(m_categoryTree);
+    treePanelLayout->setSpacing(0);
+    treePanelLayout->addWidget(m_categoryTree, 1);
+    treePanelLayout->addLayout(treeFooterLayout);
 
     // Grid panel (with the Title / File Name header row from the reference)
     auto *gridHeaderLayout = new QHBoxLayout();
@@ -139,6 +202,7 @@ MediaLibraryPanel::MediaLibraryPanel(QWidget *parent) : QWidget(parent)
     m_previewImage->setMinimumSize(kPreviewSize, kPreviewSize * 9 / 16);
     m_previewImage->setAlignment(Qt::AlignCenter);
     m_previewImage->setStyleSheet("background-color: #0f0f11; border: 1px solid #333;");
+    m_previewImage->setScaledContents(false);
     m_previewCaption = new QLabel(mediaTab);
     m_previewCaption->setAlignment(Qt::AlignCenter);
     m_previewCaption->setStyleSheet("color: #cfcfcf; padding-top: 4px;");
@@ -191,31 +255,38 @@ MediaLibraryPanel::MediaLibraryPanel(QWidget *parent) : QWidget(parent)
     rootLayout->addWidget(m_itemCountLabel);
 
     m_categoryTree->setCurrentItem(imagesItem);
-    rebuildGridForCategory(tr("Images"));
+    m_currentCategory = tr("Images");
+    rebuildGridForCategory(m_currentCategory);
 }
 
 void MediaLibraryPanel::populateSampleMedia()
 {
     // Placeholder sample data -- original flat-color swatches (generated
-    // in code, not real photography) standing in for a real media
-    // library until file import is built (build-plan step 6).
+    // in code, not real photography) standing in until the user imports
+    // their own files via the "+" button.
     m_sampleData[tr("Images")] = {
-        {tr("Beach Sunset"), QColor("#e08a4f")},
-        {tr("Blue Paint"), QColor("#1b2a6b")},
-        {tr("Cross Sunset"), QColor("#8e3b46")},
-        {tr("Fall Aspen"), QColor("#cfd66b")},
-        {tr("Highway"), QColor("#5b7a9d")},
-        {tr("Leaves"), QColor("#c98a3a")},
-        {tr("Mountain Lake"), QColor("#3e6e6e")},
-        {tr("Sun and Clouds"), QColor("#bcd7e6")},
-        {tr("Tree"), QColor("#3f6b3f")},
-        {tr("Yellow Sky"), QColor("#d8c93a")},
+        {tr("Beach Sunset"), QColor("#e08a4f"), QString()},
+        {tr("Blue Paint"), QColor("#1b2a6b"), QString()},
+        {tr("Cross Sunset"), QColor("#8e3b46"), QString()},
+        {tr("Fall Aspen"), QColor("#cfd66b"), QString()},
+        {tr("Highway"), QColor("#5b7a9d"), QString()},
+        {tr("Leaves"), QColor("#c98a3a"), QString()},
+        {tr("Mountain Lake"), QColor("#3e6e6e"), QString()},
+        {tr("Sun and Clouds"), QColor("#bcd7e6"), QString()},
+        {tr("Tree"), QColor("#3f6b3f"), QString()},
+        {tr("Yellow Sky"), QColor("#d8c93a"), QString()},
     };
     m_sampleData[tr("Videos")] = {};
     m_sampleData[tr("Feeds")] = {};
     m_sampleData[tr("DVD")] = {};
     m_sampleData[tr("Audio")] = {};
-    m_sampleData[tr("Premium Media")] = {};
+}
+
+QIcon MediaLibraryPanel::iconForEntry(const MediaEntry &entry) const
+{
+    if (!entry.imagePath.isEmpty())
+        return QIcon(makeImageThumbnail(entry.imagePath, kGridIconSize));
+    return QIcon(makeSwatch(entry.color, kGridIconSize));
 }
 
 void MediaLibraryPanel::onCategorySelected(QTreeWidgetItem *item, int column)
@@ -224,7 +295,8 @@ void MediaLibraryPanel::onCategorySelected(QTreeWidgetItem *item, int column)
     if (!item || !item->parent())
         return; // ignore clicks on non-selectable section headers
 
-    rebuildGridForCategory(item->text(0));
+    m_currentCategory = item->text(0);
+    rebuildGridForCategory(m_currentCategory);
 }
 
 void MediaLibraryPanel::rebuildGridForCategory(const QString &category)
@@ -233,8 +305,9 @@ void MediaLibraryPanel::rebuildGridForCategory(const QString &category)
 
     const auto items = m_sampleData.value(category);
     for (const auto &entry : items) {
-        auto *listItem = new QListWidgetItem(QIcon(makeSwatch(entry.second, kGridIconSize)), entry.first);
-        listItem->setData(Qt::UserRole, entry.second);
+        auto *listItem = new QListWidgetItem(iconForEntry(entry), entry.label);
+        listItem->setData(Qt::UserRole, entry.color);
+        listItem->setData(Qt::UserRole + 1, entry.imagePath);
         listItem->setTextAlignment(Qt::AlignHCenter);
         m_mediaGrid->addItem(listItem);
     }
@@ -258,8 +331,14 @@ void MediaLibraryPanel::onGridSelectionChanged()
         return;
     }
 
-    const QColor color = item->data(Qt::UserRole).value<QColor>();
-    m_previewImage->setPixmap(makeSwatch(color, kPreviewSize));
+    const QString imagePath = item->data(Qt::UserRole + 1).toString();
+    if (!imagePath.isEmpty()) {
+        const QPixmap source(imagePath);
+        m_previewImage->setPixmap(source.scaled(m_previewImage->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    } else {
+        const QColor color = item->data(Qt::UserRole).value<QColor>();
+        m_previewImage->setPixmap(makeSwatch(color, kPreviewSize));
+    }
     m_previewCaption->setText(item->text());
 }
 
@@ -268,5 +347,33 @@ void MediaLibraryPanel::onGridItemActivated(QListWidgetItem *item)
     if (!item)
         return;
     const QColor color = item->data(Qt::UserRole).value<QColor>();
-    emit mediaActivated(item->text(), color);
+    const QString imagePath = item->data(Qt::UserRole + 1).toString();
+    emit mediaActivated(item->text(), color, imagePath);
+}
+
+void MediaLibraryPanel::onImportClicked()
+{
+    const QString filter = fileFilterForCategory(m_currentCategory);
+    const QStringList paths = QFileDialog::getOpenFileNames(
+        this, tr("Import into %1").arg(m_currentCategory), QString(), filter);
+    if (paths.isEmpty())
+        return;
+
+    auto &entries = m_sampleData[m_currentCategory];
+    const bool isImageCategory = (m_currentCategory == tr("Images"));
+
+    for (const QString &path : paths) {
+        const QString label = QFileInfo(path).completeBaseName();
+        if (isImageCategory) {
+            entries.append({label, QColor(), path});
+        } else {
+            // No thumbnailing/playback for these types yet -- store a
+            // stable placeholder color so the entry is at least visually
+            // distinct and re-selectable; the file path is still kept.
+            entries.append({label, colorFromName(label), path});
+        }
+    }
+
+    rebuildGridForCategory(m_currentCategory);
+    m_mediaGrid->setCurrentRow(m_mediaGrid->count() - 1);
 }

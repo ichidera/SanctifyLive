@@ -4,15 +4,15 @@ ScheduleModel::ScheduleModel(QObject *parent) : QObject(parent)
 {
 }
 
+// ---------------------------------------------------------------------
+// Schedule editing
+// ---------------------------------------------------------------------
+
 void ScheduleModel::addSlide(const Slide &slide)
 {
     m_slides.append(slide);
-    if (m_liveIndex == -1) {
-        m_liveIndex = 0;
-        m_previewIndex = 0;
-        emit liveContentChanged();
-        emit previewChanged();
-    }
+    // Deliberately does NOT touch live/cursor state -- adding something
+    // to the schedule is just planning, not broadcasting.
     emit scheduleChanged();
 }
 
@@ -23,19 +23,21 @@ void ScheduleModel::removeSlideAt(int index)
 
     m_slides.removeAt(index);
 
-    if (m_slides.isEmpty()) {
-        m_liveIndex = -1;
-        m_previewIndex = -1;
-    } else {
-        if (m_liveIndex >= m_slides.size())
-            m_liveIndex = m_slides.size() - 1;
-        if (m_previewIndex >= m_slides.size())
-            m_previewIndex = m_slides.size() - 1;
+    if (m_liveScheduleIndex == index) {
+        // The item that was live got removed from the plan; the live
+        // output keeps showing it (it's a copied value in m_liveSlide),
+        // but it's no longer attributable to a schedule row.
+        m_liveScheduleIndex = -1;
+    } else if (m_liveScheduleIndex > index) {
+        m_liveScheduleIndex--;
     }
 
+    if (m_scheduleCursor >= m_slides.size())
+        m_scheduleCursor = m_slides.size() - 1;
+    else if (m_scheduleCursor > index)
+        m_scheduleCursor--;
+
     emit scheduleChanged();
-    emit liveContentChanged();
-    emit previewChanged();
 }
 
 void ScheduleModel::clearAll()
@@ -44,12 +46,12 @@ void ScheduleModel::clearAll()
         return;
 
     m_slides.clear();
-    m_liveIndex = -1;
-    m_previewIndex = -1;
-
+    m_scheduleCursor = -1;
+    m_liveScheduleIndex = -1;
+    // Live output and history are intentionally left alone -- clearing
+    // the plan for a new service doesn't mean cutting whatever is
+    // currently being shown.
     emit scheduleChanged();
-    emit liveContentChanged();
-    emit previewChanged();
 }
 
 int ScheduleModel::count() const
@@ -62,70 +64,64 @@ const Slide &ScheduleModel::slideAt(int index) const
     return m_slides.at(index);
 }
 
-const Slide *ScheduleModel::liveSlide() const
-{
-    if (m_blackout)
-        return nullptr;
-    if (m_liveIndex < 0 || m_liveIndex >= m_slides.size())
-        return nullptr;
-    return &m_slides.at(m_liveIndex);
-}
+// ---------------------------------------------------------------------
+// Going live
+// ---------------------------------------------------------------------
 
-const Slide *ScheduleModel::previewSlide() const
-{
-    if (m_previewIndex < 0 || m_previewIndex >= m_slides.size())
-        return nullptr;
-    return &m_slides.at(m_previewIndex);
-}
-
-void ScheduleModel::setPreviewIndex(int index)
+void ScheduleModel::goLiveFromSchedule(int index)
 {
     if (index < 0 || index >= m_slides.size())
         return;
-    if (index == m_previewIndex)
-        return;
 
-    m_previewIndex = index;
-    emit previewChanged();
+    m_liveSlide = m_slides.at(index);
+    m_hasLiveSlide = true;
+    m_liveScheduleIndex = index;
+    m_scheduleCursor = index;
+
+    pushHistory(m_liveSlide);
+    emit liveContentChanged();
 }
 
-void ScheduleModel::goLiveWithPreview()
+void ScheduleModel::sendMediaLive(const Slide &slide)
 {
-    if (m_previewIndex < 0 || m_previewIndex >= m_slides.size())
-        return;
-    if (m_previewIndex == m_liveIndex)
+    if (m_autoAddMediaToSchedule) {
+        addSlide(slide);
+        m_liveScheduleIndex = m_slides.size() - 1;
+        m_scheduleCursor = m_liveScheduleIndex;
+    } else {
+        m_liveScheduleIndex = -1;
+    }
+
+    m_liveSlide = slide;
+    m_hasLiveSlide = true;
+
+    pushHistory(m_liveSlide);
+    emit liveContentChanged();
+}
+
+void ScheduleModel::goLiveFromHistoryAt(int index)
+{
+    if (index < 0 || index >= m_history.size())
         return;
 
-    m_liveIndex = m_previewIndex;
+    m_liveSlide = m_history.at(index);
+    m_hasLiveSlide = true;
+    m_liveScheduleIndex = -1; // history doesn't track schedule provenance
+
+    pushHistory(m_liveSlide); // re-promote to the front
     emit liveContentChanged();
 }
 
 void ScheduleModel::advanceLive()
 {
-    if (m_liveIndex + 1 >= m_slides.size())
-        return;
-
-    m_liveIndex++;
-    emit liveContentChanged();
-
-    if (m_previewIndex != m_liveIndex) {
-        m_previewIndex = m_liveIndex;
-        emit previewChanged();
-    }
+    if (m_scheduleCursor + 1 < m_slides.size())
+        goLiveFromSchedule(m_scheduleCursor + 1);
 }
 
 void ScheduleModel::retreatLive()
 {
-    if (m_liveIndex - 1 < 0)
-        return;
-
-    m_liveIndex--;
-    emit liveContentChanged();
-
-    if (m_previewIndex != m_liveIndex) {
-        m_previewIndex = m_liveIndex;
-        emit previewChanged();
-    }
+    if (m_scheduleCursor - 1 >= 0)
+        goLiveFromSchedule(m_scheduleCursor - 1);
 }
 
 void ScheduleModel::setBlackout(bool blackout)
@@ -139,4 +135,50 @@ void ScheduleModel::setBlackout(bool blackout)
 void ScheduleModel::toggleBlackout()
 {
     setBlackout(!m_blackout);
+}
+
+const Slide *ScheduleModel::liveSlide() const
+{
+    if (m_blackout || !m_hasLiveSlide)
+        return nullptr;
+    return &m_liveSlide;
+}
+
+const Slide *ScheduleModel::previewSlide() const
+{
+    if (!m_hasLiveSlide)
+        return nullptr;
+    return &m_liveSlide;
+}
+
+// ---------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------
+
+int ScheduleModel::historyCount() const
+{
+    return m_history.size();
+}
+
+const Slide &ScheduleModel::historyAt(int index) const
+{
+    return m_history.at(index);
+}
+
+void ScheduleModel::pushHistory(const Slide &slide)
+{
+    // De-dupe by label so repeatedly re-showing the same item doesn't
+    // spam the strip with copies -- move it to the front instead.
+    for (int i = 0; i < m_history.size(); ++i) {
+        if (m_history.at(i).label == slide.label) {
+            m_history.removeAt(i);
+            break;
+        }
+    }
+
+    m_history.prepend(slide);
+    while (m_history.size() > kMaxHistory)
+        m_history.removeLast();
+
+    emit historyChanged();
 }

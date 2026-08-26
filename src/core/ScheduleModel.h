@@ -1,82 +1,184 @@
-#pragma once
+#include "ScheduleModel.h"
 
-#include <QObject>
-#include <QVector>
-
-#include "Slide.h"
-
-// ScheduleModel is the single source of truth for the service, and it
-// deliberately separates two ideas that are easy to conflate:
-//
-//   - PREVIEW: the slide the operator is currently looking at / staging.
-//     Selecting an item in the schedule list only changes this. Nothing
-//     the congregation sees changes when preview changes.
-//   - LIVE: the slide actually on the output screen right now. Only
-//     an explicit action (Go Live, double-click, Enter, or the
-//     Next/Previous transport buttons) changes this.
-//
-// This mirrors EasyWorship/ProPresenter's preview-vs-live model, and it
-// exists for a concrete HCI reason: an operator scanning ahead in the
-// schedule (e.g. during a lull) must never accidentally push something
-// to the screen just by clicking to look at it.
-class ScheduleModel : public QObject
+ScheduleModel::ScheduleModel(QObject *parent) : QObject(parent)
 {
-    Q_OBJECT
+}
 
-public:
-    explicit ScheduleModel(QObject *parent = nullptr);
+// ---------------------------------------------------------------------
+// Schedule editing
+// ---------------------------------------------------------------------
 
-    void addSlide(const Slide &slide);
-    void removeSlideAt(int index);
-    void clearAll();
+void ScheduleModel::addSlide(const Slide &slide)
+{
+    m_slides.append(slide);
+    // Deliberately does NOT touch live/cursor state -- adding something
+    // to the schedule is just planning, not broadcasting.
+    emit scheduleChanged();
+}
 
-    int count() const;
-    const Slide &slideAt(int index) const;
+void ScheduleModel::removeSlideAt(int index)
+{
+    if (index < 0 || index >= m_slides.size())
+        return;
 
-    int liveIndex() const { return m_liveIndex; }
-    int previewIndex() const { return m_previewIndex; }
-    bool isBlackout() const { return m_blackout; }
+    m_slides.removeAt(index);
 
-    // Returns nullptr if there is no live slide (empty schedule or blackout).
-    const Slide *liveSlide() const;
+    if (m_liveScheduleIndex == index) {
+        // The item that was live got removed from the plan; the live
+        // output keeps showing it (it's a copied value in m_liveSlide),
+        // but it's no longer attributable to a schedule row.
+        m_liveScheduleIndex = -1;
+    } else if (m_liveScheduleIndex > index) {
+        m_liveScheduleIndex--;
+    }
 
-    // Returns nullptr only if the schedule is empty. Blackout does NOT
-    // affect this -- the operator should always be able to see what
-    // they're about to send live, even while the audience screen is black.
-    const Slide *previewSlide() const;
+    if (m_scheduleCursor >= m_slides.size())
+        m_scheduleCursor = m_slides.size() - 1;
+    else if (m_scheduleCursor > index)
+        m_scheduleCursor--;
 
-public slots:
-    // Stages a slide for preview without touching what's live.
-    void setPreviewIndex(int index);
+    emit scheduleChanged();
+}
 
-    // Commits the currently-previewed slide to the live output.
-    void goLiveWithPreview();
+void ScheduleModel::clearAll()
+{
+    if (m_slides.isEmpty())
+        return;
 
-    // Direct live transport, for the Next/Previous buttons and keyboard
-    // shortcuts used during the flow of a service. Keeps preview in sync
-    // with live afterward so the schedule list highlighting stays sane.
-    void advanceLive();
-    void retreatLive();
+    m_slides.clear();
+    m_scheduleCursor = -1;
+    m_liveScheduleIndex = -1;
+    // Live output and history are intentionally left alone -- clearing
+    // the plan for a new service doesn't mean cutting whatever is
+    // currently being shown.
+    emit scheduleChanged();
+}
 
-    void setBlackout(bool blackout);
-    void toggleBlackout();
+int ScheduleModel::count() const
+{
+    return m_slides.size();
+}
 
-signals:
-    // Fired whenever the schedule contents change (add/remove) so views
-    // can refresh their lists.
-    void scheduleChanged();
+const Slide &ScheduleModel::slideAt(int index) const
+{
+    return m_slides.at(index);
+}
 
-    // Fired whenever the LIVE output should change -- index moved or
-    // blackout toggled. This is what OutputWindow (in Live mode) listens to.
-    void liveContentChanged();
+// ---------------------------------------------------------------------
+// Going live
+// ---------------------------------------------------------------------
 
-    // Fired whenever the PREVIEW selection changes. This is what the
-    // preview pane (OutputWindow in Preview mode) listens to.
-    void previewChanged();
+void ScheduleModel::goLiveFromSchedule(int index)
+{
+    if (index < 0 || index >= m_slides.size())
+        return;
 
-private:
-    QVector<Slide> m_slides;
-    int m_liveIndex = -1;
-    int m_previewIndex = -1;
-    bool m_blackout = false;
-};
+    m_liveSlide = m_slides.at(index);
+    m_hasLiveSlide = true;
+    m_liveScheduleIndex = index;
+    m_scheduleCursor = index;
+
+    pushHistory(m_liveSlide);
+    emit liveContentChanged();
+}
+
+void ScheduleModel::sendMediaLive(const Slide &slide)
+{
+    if (m_autoAddMediaToSchedule) {
+        addSlide(slide);
+        m_liveScheduleIndex = m_slides.size() - 1;
+        m_scheduleCursor = m_liveScheduleIndex;
+    } else {
+        m_liveScheduleIndex = -1;
+    }
+
+    m_liveSlide = slide;
+    m_hasLiveSlide = true;
+
+    pushHistory(m_liveSlide);
+    emit liveContentChanged();
+}
+
+void ScheduleModel::goLiveFromHistoryAt(int index)
+{
+    if (index < 0 || index >= m_history.size())
+        return;
+
+    m_liveSlide = m_history.at(index);
+    m_hasLiveSlide = true;
+    m_liveScheduleIndex = -1; // history doesn't track schedule provenance
+
+    pushHistory(m_liveSlide); // re-promote to the front
+    emit liveContentChanged();
+}
+
+void ScheduleModel::advanceLive()
+{
+    if (m_scheduleCursor + 1 < m_slides.size())
+        goLiveFromSchedule(m_scheduleCursor + 1);
+}
+
+void ScheduleModel::retreatLive()
+{
+    if (m_scheduleCursor - 1 >= 0)
+        goLiveFromSchedule(m_scheduleCursor - 1);
+}
+
+void ScheduleModel::setBlackout(bool blackout)
+{
+    if (m_blackout == blackout)
+        return;
+    m_blackout = blackout;
+    emit liveContentChanged();
+}
+
+void ScheduleModel::toggleBlackout()
+{
+    setBlackout(!m_blackout);
+}
+
+const Slide *ScheduleModel::liveSlide() const
+{
+    if (m_blackout || !m_hasLiveSlide)
+        return nullptr;
+    return &m_liveSlide;
+}
+
+const Slide *ScheduleModel::previewSlide() const
+{
+    if (!m_hasLiveSlide)
+        return nullptr;
+    return &m_liveSlide;
+}
+
+// ---------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------
+
+int ScheduleModel::historyCount() const
+{
+    return m_history.size();
+}
+
+const Slide &ScheduleModel::historyAt(int index) const
+{
+    return m_history.at(index);
+}
+
+void ScheduleModel::pushHistory(const Slide &slide)
+{
+    // De-dupe by label so repeatedly re-showing the same item doesn't
+    // spam the strip with copies -- move it to the front instead.
+    for (int i = 0; i < m_history.size(); ++i) {
+        if (m_history.at(i).label == slide.label) {
+            m_history.removeAt(i);
+            break;
+        }
+    }
+
+    m_history.prepend(slide);
+    while (m_history.size() > kMaxHistory)
+        m_history.removeLast();
+
+    emit historyChanged();
+}

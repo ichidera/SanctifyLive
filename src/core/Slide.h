@@ -15,8 +15,14 @@
 struct Slide
 {
     QString label;    // e.g. "Amazing Grace - Verse 1", shown only to the operator
-    QString text;     // the content actually projected
+    QString text;     // the content actually projected as an overlay
     QColor background = Qt::black;
+
+    // If non-empty, this real image file is drawn as the background
+    // (scaled to fill, like CSS background-size: cover) instead of the
+    // solid `background` color. Left empty for text slides and the
+    // placeholder color swatches used before real media import existed.
+    QString backgroundImagePath;
 
     Slide() = default;
     Slide(QString label_, QString text_, QColor background_ = Qt::black)

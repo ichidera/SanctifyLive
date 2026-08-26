@@ -22,6 +22,8 @@ add_executable(SanctifyLive
     src/core/IconFactory.h
     src/core/MediaLibraryPanel.h
     src/core/MediaLibraryPanel.cpp
+    src/core/HistoryBar.h
+    src/core/HistoryBar.cpp
     src/core/OperatorWindow.h
     src/core/OperatorWindow.cpp
 )

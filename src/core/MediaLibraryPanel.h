@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QWidget>
 
 class QTabWidget;
@@ -9,6 +10,7 @@ class QListWidget;
 class QListWidgetItem;
 class QLabel;
 class QLineEdit;
+class QToolButton;
 
 // The bottom resource library: a row of content-type tabs (Songs,
 // Scriptures, Media, Presentations, Themes), and -- for the Media tab,
@@ -16,11 +18,10 @@ class QLineEdit;
 // thumbnail grid in the middle, and a larger preview on the right.
 //
 // Only "Media" is functional right now; the others are visible-but-
-// disabled placeholders so the tab row doesn't need reshuffling once
-// they're built (see build-plan steps 4 & 6). Everything inside is
-// placeholder sample data (flat color swatches standing in for real
-// photos) purely to prove the layout -- swapping in a real asset/import
-// pipeline later only touches this file.
+// disabled placeholders. A handful of sample color-swatch entries ship
+// built in purely to prove the layout; anything the user imports via
+// the "+" button is real (a real image file, or a placeholder for
+// non-image types until those get proper thumbnailing/playback).
 //
 // All internal splits use QSplitter, so the tree/grid/preview widths
 // are user-resizable, matching the rest of the app's panels.
@@ -32,18 +33,29 @@ public:
     explicit MediaLibraryPanel(QWidget *parent = nullptr);
 
 signals:
-    // Emitted when the user double-clicks (or otherwise activates) a
-    // media item to send it into the schedule as a new slide.
-    void mediaActivated(const QString &label, const QColor &background);
+    // Emitted when the user activates (double-clicks) a media item to
+    // send it live. imagePath is empty for the placeholder color
+    // swatches; when non-empty, the real image should be used as the
+    // background with no text overlay.
+    void mediaActivated(const QString &label, const QColor &background, const QString &imagePath);
 
 private slots:
     void onCategorySelected(QTreeWidgetItem *item, int column);
     void onGridSelectionChanged();
     void onGridItemActivated(QListWidgetItem *item);
+    void onImportClicked();
 
 private:
+    struct MediaEntry
+    {
+        QString label;
+        QColor color;
+        QString imagePath; // empty for placeholder swatches
+    };
+
     void populateSampleMedia();
     void rebuildGridForCategory(const QString &category);
+    QIcon iconForEntry(const MediaEntry &entry) const;
 
     QTabWidget *m_contentTabs;
     QTreeWidget *m_categoryTree;
@@ -52,7 +64,8 @@ private:
     QLabel *m_previewCaption;
     QLabel *m_itemCountLabel;
     QLineEdit *m_searchBox;
+    QToolButton *m_importButton;
 
-    // category name -> list of (label, color) pairs
-    QMap<QString, QVector<QPair<QString, QColor>>> m_sampleData;
+    QString m_currentCategory;
+    QMap<QString, QVector<MediaEntry>> m_sampleData;
 };

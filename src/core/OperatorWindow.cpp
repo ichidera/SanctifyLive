@@ -2,7 +2,10 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QCloseEvent>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QEvent>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -19,6 +22,7 @@
 #include <QToolBar>
 #include <QToolButton>
 
+#include "HistoryBar.h"
 #include "IconFactory.h"
 #include "MediaLibraryPanel.h"
 #include "OutputWindow.h"
@@ -58,11 +62,12 @@ OperatorWindow::OperatorWindow(QWidget *parent)
 
     buildMenuBar();
     buildToolBar();
+
+    m_historyBar = new HistoryBar(m_model, this);
     setCentralWidget(buildWorkspace());
 
     connect(m_model, &ScheduleModel::scheduleChanged, this, &OperatorWindow::onScheduleChanged);
     connect(m_model, &ScheduleModel::liveContentChanged, this, &OperatorWindow::onLiveContentChanged);
-    connect(m_model, &ScheduleModel::previewChanged, this, &OperatorWindow::onLiveContentChanged);
 
     // Starter content so the app isn't empty on first launch.
     m_model->addSlide(Slide(tr("Welcome"), tr("Welcome to the service"), QColor("#1a1a2e")));
@@ -96,6 +101,9 @@ void OperatorWindow::buildMenuBar()
     QMenu *editMenu = menuBar()->addMenu(tr("&Edit"));
     editMenu->addAction(makeComingSoonAction(QIcon(), tr("&Undo"), this));
     editMenu->addAction(makeComingSoonAction(QIcon(), tr("&Redo"), this));
+    editMenu->addSeparator();
+    QAction *actOptions = editMenu->addAction(tr("&Options..."));
+    connect(actOptions, &QAction::triggered, this, &OperatorWindow::onEditOptions);
 
     QMenu *liveMenu = menuBar()->addMenu(tr("&Live"));
     QAction *actGoLiveMenu = liveMenu->addAction(tr("&Go Live"));
@@ -273,7 +281,15 @@ QWidget *OperatorWindow::buildWorkspace()
     mainSplitter->setStretchFactor(0, 3);
     mainSplitter->setStretchFactor(1, 2);
 
-    return mainSplitter;
+    auto *centralLayout = new QVBoxLayout();
+    centralLayout->setContentsMargins(0, 0, 0, 0);
+    centralLayout->setSpacing(0);
+    centralLayout->addWidget(m_historyBar);
+    centralLayout->addWidget(mainSplitter, 1);
+
+    auto *central = new QWidget(this);
+    central->setLayout(centralLayout);
+    return central;
 }
 
 // ---------------------------------------------------------------------
@@ -303,19 +319,39 @@ void OperatorWindow::onScheduleRowChanged(int row)
 {
     if (row < 0)
         return;
-    // Selecting a schedule item commits it straight to live -- see the
-    // class comment in OperatorWindow.h for why this design chose the
-    // direct (rather than staged-preview) interaction model.
-    m_model->setPreviewIndex(row);
-    m_model->goLiveWithPreview();
+    m_model->goLiveFromSchedule(row);
 }
 
-void OperatorWindow::onMediaActivated(const QString &label, const QColor &background)
+void OperatorWindow::onMediaActivated(const QString &label, const QColor &background, const QString &imagePath)
 {
-    m_model->addSlide(Slide(label, label, background));
-    const int newIndex = m_model->count() - 1;
-    m_model->setPreviewIndex(newIndex);
-    m_model->goLiveWithPreview();
+    // A real imported image supplies its own visual, so no text overlay;
+    // the placeholder color swatches show their label as overlay text
+    // since they have no actual picture to display.
+    Slide slide(label, imagePath.isEmpty() ? label : QString(), background);
+    slide.backgroundImagePath = imagePath;
+    m_model->sendMediaLive(slide);
+}
+
+void OperatorWindow::onEditOptions()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Options"));
+
+    auto *autoAddCheck = new QCheckBox(
+        tr("Automatically add media items to the schedule when sent live"), &dialog);
+    autoAddCheck->setChecked(m_model->autoAddMediaToSchedule());
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->addWidget(autoAddCheck);
+    layout->addWidget(buttons);
+
+    if (dialog.exec() == QDialog::Accepted) {
+        m_model->setAutoAddMediaToSchedule(autoAddCheck->isChecked());
+    }
 }
 
 void OperatorWindow::onScheduleChanged()
@@ -342,7 +378,8 @@ void OperatorWindow::rebuildScheduleList()
     for (int i = 0; i < m_model->count(); ++i) {
         m_scheduleList->addItem(m_model->slideAt(i).label);
     }
-    m_scheduleList->setCurrentRow(m_model->liveIndex());
+    const int rowToSelect = (m_model->liveScheduleIndex() >= 0) ? m_model->liveScheduleIndex() : m_model->scheduleCursor();
+    m_scheduleList->setCurrentRow(rowToSelect);
     refreshScheduleHighlighting();
     refreshLiveOutputFooter();
 }
@@ -352,7 +389,7 @@ void OperatorWindow::refreshScheduleHighlighting()
     for (int i = 0; i < m_scheduleList->count(); ++i) {
         QListWidgetItem *item = m_scheduleList->item(i);
         const QString baseLabel = m_model->slideAt(i).label;
-        if (i == m_model->liveIndex() && !m_model->isBlackout()) {
+        if (i == m_model->liveScheduleIndex() && !m_model->isBlackout()) {
             item->setText(tr("\u25CF ON AIR  %1").arg(baseLabel));
             item->setForeground(QColor("#e74c3c"));
         } else {
@@ -366,9 +403,11 @@ void OperatorWindow::refreshLiveOutputFooter()
 {
     if (m_model->count() == 0) {
         m_slideCounterLabel->setText(tr("No slides"));
+    } else if (m_model->scheduleCursor() < 0) {
+        m_slideCounterLabel->setText(tr("Slide - of %1").arg(m_model->count()));
     } else {
         m_slideCounterLabel->setText(tr("Slide %1 of %2")
-            .arg(m_model->liveIndex() + 1)
+            .arg(m_model->scheduleCursor() + 1)
             .arg(m_model->count()));
     }
 }

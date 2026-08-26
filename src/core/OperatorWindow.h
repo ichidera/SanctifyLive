@@ -8,20 +8,22 @@ class QLabel;
 class ScheduleModel;
 class OutputWindow;
 class MediaLibraryPanel;
+class HistoryBar;
 
-// OperatorWindow: menu bar + toolbar up top, then a resizable vertical
-// split between the three-column live workspace (Schedule | Live editor
-// | Live Output) and the bottom media/resource library. Every internal
-// division is a QSplitter and every major panel has a View-menu toggle,
-// so the layout is fully rearrangeable rather than fixed.
+// OperatorWindow: menu bar + toolbar up top, a History strip, then a
+// resizable vertical split between the three-column live workspace
+// (Schedule | Live editor | Live Output) and the bottom media/resource
+// library. Every internal division is a QSplitter and every major panel
+// has a View-menu toggle, so the layout is fully rearrangeable.
 //
-// Interaction model: selecting an item in the Schedule list (or
-// double-clicking a media item in the library) commits it straight to
-// Live -- there is no separate "staged but not live" step, matching the
-// direct schedule-builder workflow this UI is modeled on. The
-// underlying ScheduleModel still supports a two-step preview/commit
-// (setPreviewIndex + goLiveWithPreview) if a safer staged workflow is
-// wanted later; this window just chooses to call both together.
+// Interaction model: selecting a Schedule item, or double-clicking a
+// media item, commits straight to Live -- there's no separate "staged"
+// step. Sending media live does NOT add it to the Schedule by default
+// (the Schedule is the pre-planned service order, not a log of what's
+// been shown); that can be turned on in Edit > Options if someone wants
+// the old behavior. Whatever goes live -- from the Schedule or the
+// library -- is recorded in the History strip regardless, so the
+// operator can always get back to something they showed.
 class OperatorWindow : public QMainWindow
 {
     Q_OBJECT
@@ -39,7 +41,7 @@ private slots:
     void onAddSlideClicked();
     void onRemoveSlideClicked();
     void onScheduleRowChanged(int row);
-    void onMediaActivated(const QString &label, const QColor &background);
+    void onMediaActivated(const QString &label, const QColor &background, const QString &imagePath);
     void onLiveContentChanged();
     void onScheduleChanged();
 
@@ -48,6 +50,7 @@ private slots:
     void onBlackToggled(bool checked);
     void onClearAction();
     void onLiveOutputToggled(bool checked);
+    void onEditOptions();
     void onAbout();
 
 private:
@@ -66,6 +69,7 @@ private:
     OutputWindow *m_liveEditorView; // "Live - <item>" mirror (middle pane)
     OutputWindow *m_liveOutputView; // "Live Output" mirror (right pane)
     MediaLibraryPanel *m_mediaLibrary;
+    HistoryBar *m_historyBar;
 
     // Panel containers, kept as members so the View menu can toggle them.
     QWidget *m_schedulePanel;

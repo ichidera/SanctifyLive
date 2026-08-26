@@ -16,15 +16,11 @@ OutputWindow::OutputWindow(ScheduleModel *model, Source source, QWidget *parent)
     setAutoFillBackground(true);
     setPalette(pal);
 
-    if (m_source == Source::Live) {
-        connect(m_model, &ScheduleModel::liveContentChanged,
-                this, &OutputWindow::onContentChanged);
-    } else {
-        connect(m_model, &ScheduleModel::previewChanged,
-                this, &OutputWindow::onContentChanged);
-    }
-    // Either pane also needs to repaint if a slide's own content changed
-    // (e.g. edited in place) or the schedule shrank out from under it.
+    // Both Live and Preview modes are driven by the same underlying live
+    // content now (see ScheduleModel) -- the only difference between them
+    // is that Live respects blackout and Preview doesn't. So both listen
+    // to the same signal.
+    connect(m_model, &ScheduleModel::liveContentChanged, this, &OutputWindow::onContentChanged);
     connect(m_model, &ScheduleModel::scheduleChanged, this, &OutputWindow::onContentChanged);
 }
 
@@ -50,7 +46,25 @@ void OutputWindow::paintEvent(QPaintEvent *event)
         return;
     }
 
-    painter.fillRect(rect(), slide->background);
+    if (!slide->backgroundImagePath.isEmpty()) {
+        const QPixmap pixmap(slide->backgroundImagePath);
+        if (!pixmap.isNull()) {
+            // Cover-fit: scale to fill the widget, cropping any overflow,
+            // same idea as CSS background-size: cover.
+            const QPixmap scaled = pixmap.scaled(size(), Qt::KeepAspectRatioByExpanding,
+                                                  Qt::SmoothTransformation);
+            const QRect sourceRect(
+                (scaled.width() - width()) / 2, (scaled.height() - height()) / 2,
+                width(), height());
+            painter.drawPixmap(rect(), scaled, sourceRect);
+        } else {
+            // File went missing/unreadable since it was imported -- fail
+            // back to the solid color rather than showing nothing.
+            painter.fillRect(rect(), slide->background);
+        }
+    } else {
+        painter.fillRect(rect(), slide->background);
+    }
 
     if (slide->text.isEmpty())
         return;
