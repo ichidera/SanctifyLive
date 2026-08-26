@@ -7,3 +7,6 @@ SanctifyLive.zip
 docs/
 *.log
 .git/
+.gradle/
+.idea/
+local.properties
