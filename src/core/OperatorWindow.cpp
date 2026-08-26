@@ -1,6 +1,8 @@
 #include "OperatorWindow.h"
 
 #include <QApplication>
+#include <QCloseEvent>
+#include <QEvent>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -206,6 +208,32 @@ void OperatorWindow::onToggleOutputWindow()
         m_outputWindow->show();
     }
     m_toggleOutputButton->setText(tr("Hide Output Window"));
+}
+
+void OperatorWindow::changeEvent(QEvent *event)
+{
+    QMainWindow::changeEvent(event);
+
+    // Whenever the operator window becomes the active window again (e.g.
+    // the user alt-tabs back to it, or clicks it after having another app
+    // on top), bring the output window back above whatever was covering
+    // it. raise() only reorders stacking -- it does NOT steal keyboard
+    // focus, so the operator window stays the one receiving keypresses
+    // (arrow keys / space / B still work uninterrupted).
+    if (event->type() == QEvent::ActivationChange && isActiveWindow()) {
+        if (m_outputWindow->isVisible())
+            m_outputWindow->raise();
+    }
+}
+
+void OperatorWindow::closeEvent(QCloseEvent *event)
+{
+    // Treat this as one application: closing the control window should
+    // never leave a bare output window orphaned on screen (or keep the
+    // process alive because a top-level window is technically still
+    // open). Close it explicitly before the base implementation proceeds.
+    m_outputWindow->close();
+    QMainWindow::closeEvent(event);
 }
 
 void OperatorWindow::keyPressEvent(QKeyEvent *event)
