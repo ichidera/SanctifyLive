@@ -7,11 +7,13 @@ ScheduleModel::ScheduleModel(QObject *parent) : QObject(parent)
 void ScheduleModel::addSlide(const Slide &slide)
 {
     m_slides.append(slide);
-    if (m_currentIndex == -1) {
-        m_currentIndex = 0;
+    if (m_liveIndex == -1) {
+        m_liveIndex = 0;
+        m_previewIndex = 0;
+        emit liveContentChanged();
+        emit previewChanged();
     }
     emit scheduleChanged();
-    emit liveContentChanged();
 }
 
 void ScheduleModel::removeSlideAt(int index)
@@ -22,13 +24,18 @@ void ScheduleModel::removeSlideAt(int index)
     m_slides.removeAt(index);
 
     if (m_slides.isEmpty()) {
-        m_currentIndex = -1;
-    } else if (m_currentIndex >= m_slides.size()) {
-        m_currentIndex = m_slides.size() - 1;
+        m_liveIndex = -1;
+        m_previewIndex = -1;
+    } else {
+        if (m_liveIndex >= m_slides.size())
+            m_liveIndex = m_slides.size() - 1;
+        if (m_previewIndex >= m_slides.size())
+            m_previewIndex = m_slides.size() - 1;
     }
 
     emit scheduleChanged();
     emit liveContentChanged();
+    emit previewChanged();
 }
 
 int ScheduleModel::count() const
@@ -41,45 +48,69 @@ const Slide &ScheduleModel::slideAt(int index) const
     return m_slides.at(index);
 }
 
-const Slide *ScheduleModel::currentSlide() const
+const Slide *ScheduleModel::liveSlide() const
 {
     if (m_blackout)
         return nullptr;
-    if (m_currentIndex < 0 || m_currentIndex >= m_slides.size())
+    if (m_liveIndex < 0 || m_liveIndex >= m_slides.size())
         return nullptr;
-    return &m_slides.at(m_currentIndex);
+    return &m_slides.at(m_liveIndex);
 }
 
-const Slide *ScheduleModel::nextSlide() const
+const Slide *ScheduleModel::previewSlide() const
 {
-    const int next = m_currentIndex + 1;
-    if (next < 0 || next >= m_slides.size())
+    if (m_previewIndex < 0 || m_previewIndex >= m_slides.size())
         return nullptr;
-    return &m_slides.at(next);
+    return &m_slides.at(m_previewIndex);
 }
 
-void ScheduleModel::goToIndex(int index)
+void ScheduleModel::setPreviewIndex(int index)
 {
     if (index < 0 || index >= m_slides.size())
         return;
-    if (index == m_currentIndex)
+    if (index == m_previewIndex)
         return;
 
-    m_currentIndex = index;
+    m_previewIndex = index;
+    emit previewChanged();
+}
+
+void ScheduleModel::goLiveWithPreview()
+{
+    if (m_previewIndex < 0 || m_previewIndex >= m_slides.size())
+        return;
+    if (m_previewIndex == m_liveIndex)
+        return;
+
+    m_liveIndex = m_previewIndex;
     emit liveContentChanged();
 }
 
-void ScheduleModel::advance()
+void ScheduleModel::advanceLive()
 {
-    if (m_currentIndex + 1 < m_slides.size()) {
-        goToIndex(m_currentIndex + 1);
+    if (m_liveIndex + 1 >= m_slides.size())
+        return;
+
+    m_liveIndex++;
+    emit liveContentChanged();
+
+    if (m_previewIndex != m_liveIndex) {
+        m_previewIndex = m_liveIndex;
+        emit previewChanged();
     }
 }
 
-void ScheduleModel::retreat()
+void ScheduleModel::retreatLive()
 {
-    if (m_currentIndex - 1 >= 0) {
-        goToIndex(m_currentIndex - 1);
+    if (m_liveIndex - 1 < 0)
+        return;
+
+    m_liveIndex--;
+    emit liveContentChanged();
+
+    if (m_previewIndex != m_liveIndex) {
+        m_previewIndex = m_liveIndex;
+        emit previewChanged();
     }
 }
 

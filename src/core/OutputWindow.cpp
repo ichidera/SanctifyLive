@@ -5,26 +5,32 @@
 
 #include "ScheduleModel.h"
 
-OutputWindow::OutputWindow(ScheduleModel *model, QWidget *parent)
-    : QWidget(parent), m_model(model)
+OutputWindow::OutputWindow(ScheduleModel *model, Source source, QWidget *parent)
+    : QWidget(parent), m_model(model), m_source(source)
 {
     setWindowTitle(tr("SanctifyLive - Output"));
-    setMinimumSize(480, 270); // 16:9 floor so text layout stays sane while resizing
+    setMinimumSize(320, 180); // 16:9 floor so text layout stays sane while resizing
 
-    // Plain black until told otherwise -- an output window should never
-    // show stale or garbage content before the model has spoken.
     QPalette pal = palette();
     pal.setColor(QPalette::Window, Qt::black);
     setAutoFillBackground(true);
     setPalette(pal);
 
-    connect(m_model, &ScheduleModel::liveContentChanged,
-            this, &OutputWindow::onLiveContentChanged);
+    if (m_source == Source::Live) {
+        connect(m_model, &ScheduleModel::liveContentChanged,
+                this, &OutputWindow::onContentChanged);
+    } else {
+        connect(m_model, &ScheduleModel::previewChanged,
+                this, &OutputWindow::onContentChanged);
+    }
+    // Either pane also needs to repaint if a slide's own content changed
+    // (e.g. edited in place) or the schedule shrank out from under it.
+    connect(m_model, &ScheduleModel::scheduleChanged, this, &OutputWindow::onContentChanged);
 }
 
-void OutputWindow::onLiveContentChanged()
+void OutputWindow::onContentChanged()
 {
-    update(); // schedule a repaint; Qt coalesces repeated calls automatically
+    update();
 }
 
 void OutputWindow::paintEvent(QPaintEvent *event)
@@ -34,12 +40,11 @@ void OutputWindow::paintEvent(QPaintEvent *event)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
 
-    const Slide *slide = m_model->currentSlide();
+    const Slide *slide = (m_source == Source::Live) ? m_model->liveSlide() : m_model->previewSlide();
 
-    // Blackout or empty schedule: fill black and draw nothing else.
-    // This is the one-click "instant cut to black" behavior from the
-    // feature reference -- it must be unconditional and never show
-    // leftover text underneath.
+    // No slide (blackout, in Live mode, or an empty schedule): fill black
+    // and draw nothing else. Must be unconditional -- this is the
+    // "instant cut to black" behavior and it must never show stale text.
     if (!slide) {
         painter.fillRect(rect(), Qt::black);
         return;
@@ -51,8 +56,6 @@ void OutputWindow::paintEvent(QPaintEvent *event)
         return;
 
     QFont font = painter.font();
-    // Scale text to the window height so it stays legible whether this
-    // is a small preview or a full-screen projector output.
     font.setPixelSize(qMax(12, height() / 8));
     font.setBold(true);
     painter.setFont(font);

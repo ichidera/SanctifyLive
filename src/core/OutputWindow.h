@@ -4,34 +4,39 @@
 
 class ScheduleModel;
 
-// OutputWindow is what actually gets projected/displayed to the
-// congregation. It observes a ScheduleModel and repaints whenever the
-// live content changes -- it never receives direct commands from the
-// operator UI. Keeping this one-directional (model -> output) is what
-// lets future control surfaces (web remote, stage view) drive the same
-// output without this class needing to know they exist.
+// OutputWindow renders a slide from the ScheduleModel. It has two modes:
 //
-// NOTE on architecture: this is a plain QWidget with a paintEvent for
-// milestone one, which is enough to prove the control loop end-to-end.
-// Once media/video layers are introduced, this should become a
-// QOpenGLWidget (or move to Qt Quick/QRhi) so slide composition is
-// GPU-accelerated and can run its own render loop independent of the
-// operator UI thread -- see the "Core render & output pipeline" step
-// in the build plan. Swapping that in later shouldn't require changes
-// outside this file, since everything else only talks to ScheduleModel.
+//   - Live:    tracks liveContentChanged(); this is the actual
+//              congregation-facing output, and the small in-app mirror
+//              of it.
+//   - Preview: tracks previewChanged(); this is what the operator is
+//              staging and has NOT been sent to the audience yet.
+//
+// Same rendering code either way -- the only difference is which model
+// signal it listens to and which slide it asks for. Keeping this as one
+// class (rather than two) guarantees the preview and live panes always
+// look pixel-identical, which matters: the operator needs to trust that
+// what they previewed is exactly what will go out.
+//
+// NOTE on architecture: still a plain QWidget with paintEvent for this
+// milestone. See the earlier note in this file's history about moving
+// to QOpenGLWidget/QRhi once media/video layers are introduced.
 class OutputWindow : public QWidget
 {
     Q_OBJECT
 
 public:
-    explicit OutputWindow(ScheduleModel *model, QWidget *parent = nullptr);
+    enum class Source { Live, Preview };
+
+    explicit OutputWindow(ScheduleModel *model, Source source, QWidget *parent = nullptr);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
 
 private slots:
-    void onLiveContentChanged();
+    void onContentChanged();
 
 private:
     ScheduleModel *m_model;
+    Source m_source;
 };
