@@ -1,162 +1,70 @@
 #include "OperatorWindow.h"
 
+#include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
 #include <QEvent>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
-#include <QGroupBox>
 #include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QListWidget>
+#include <QMenuBar>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QScreen>
 #include <QSplitter>
-#include <QTabWidget>
+#include <QToolBar>
+#include <QToolButton>
 
+#include "IconFactory.h"
+#include "MediaLibraryPanel.h"
 #include "OutputWindow.h"
 #include "ScheduleModel.h"
 
 namespace {
-// A small helper so panel headers ("PREVIEW" / "LIVE") get a consistent
-// look without repeating stylesheet strings at every call site.
-QLabel *makeHeaderLabel(const QString &text, const QString &accentColor, QWidget *parent)
+QLabel *makePanelHeader(const QString &text, QWidget *parent)
 {
     auto *label = new QLabel(text, parent);
-    label->setAlignment(Qt::AlignCenter);
-    label->setStyleSheet(QStringLiteral(
-        "font-weight: 600; font-size: 12px; letter-spacing: 1px; padding: 4px; "
-        "color: %1; background-color: #1a1a1a; border-radius: 3px;").arg(accentColor));
+    label->setStyleSheet("background-color: #1a1a1d; color: #cfcfcf; padding: 4px 8px; "
+                          "border-bottom: 1px solid #333;");
     return label;
+}
+
+// A toolbar/menu action that's part of the visual layout but not wired
+// up yet -- disabled with an explanatory tooltip rather than silently
+// doing nothing, which would be a worse HCI failure than not having the
+// button at all.
+QAction *makeComingSoonAction(const QIcon &icon, const QString &text, QObject *parent)
+{
+    auto *action = new QAction(icon, text, parent);
+    action->setEnabled(false);
+    action->setToolTip(QObject::tr("Coming in a future update"));
+    return action;
 }
 }
 
 OperatorWindow::OperatorWindow(QWidget *parent)
     : QMainWindow(parent), m_model(new ScheduleModel(this))
 {
-    setWindowTitle(tr("SanctifyLive - Operator"));
-    resize(1280, 720);
+    setWindowTitle(tr("SanctifyLive"));
+    resize(1500, 820);
 
-    // Three OutputWindow instances share the same model: the real
-    // congregation-facing output, an in-app Live mirror (no second
-    // monitor required), and a Preview pane the operator can look ahead
-    // in without it ever reaching the audience.
     m_outputWindow = new OutputWindow(m_model, OutputWindow::Source::Live, nullptr);
-    m_livePreview = new OutputWindow(m_model, OutputWindow::Source::Live, this);
-    m_previewPane = new OutputWindow(m_model, OutputWindow::Source::Preview, this);
-    m_livePreview->setMinimumHeight(140);
-    m_previewPane->setMinimumHeight(140);
+    m_liveEditorView = new OutputWindow(m_model, OutputWindow::Source::Preview, this);
+    m_liveOutputView = new OutputWindow(m_model, OutputWindow::Source::Live, this);
 
-    // ---------- Resource tabs (left) ----------
-    m_scheduleList = new QListWidget(this);
-    m_scheduleList->setAlternatingRowColors(true);
-    connect(m_scheduleList, &QListWidget::currentRowChanged,
-            this, &OperatorWindow::onScheduleRowChanged);
-    connect(m_scheduleList, &QListWidget::itemDoubleClicked,
-            this, &OperatorWindow::onScheduleItemDoubleClicked);
-
-    m_addButton = new QPushButton(tr("+ Add Slide"), this);
-    m_removeButton = new QPushButton(tr("Remove"), this);
-    connect(m_addButton, &QPushButton::clicked, this, &OperatorWindow::onAddSlideClicked);
-    connect(m_removeButton, &QPushButton::clicked, this, &OperatorWindow::onRemoveSlideClicked);
-
-    auto *scheduleButtons = new QHBoxLayout();
-    scheduleButtons->addWidget(m_addButton);
-    scheduleButtons->addWidget(m_removeButton);
-
-    auto *scheduleTabLayout = new QVBoxLayout();
-    scheduleTabLayout->addWidget(m_scheduleList, /*stretch=*/1);
-    scheduleTabLayout->addLayout(scheduleButtons);
-
-    auto *scheduleTab = new QWidget(this);
-    scheduleTab->setLayout(scheduleTabLayout);
-
-    m_resourceTabs = new QTabWidget(this);
-    m_resourceTabs->addTab(scheduleTab, tr("Schedule"));
-    // Placeholders: the tabs exist now so the panel structure doesn't
-    // need reworking once Songs/Media/Scripture libraries are built.
-    m_resourceTabs->addTab(new QWidget(this), tr("Songs"));
-    m_resourceTabs->addTab(new QWidget(this), tr("Media"));
-    m_resourceTabs->addTab(new QWidget(this), tr("Scripture"));
-    m_resourceTabs->setTabEnabled(1, false);
-    m_resourceTabs->setTabEnabled(2, false);
-    m_resourceTabs->setTabEnabled(3, false);
-    m_resourceTabs->setMinimumWidth(300);
-
-    // ---------- Preview pane (center) ----------
-    m_goLiveButton = new QPushButton(tr("GO LIVE  \u25B6"), this);
-    m_goLiveButton->setObjectName("goLiveButton");
-    m_goLiveButton->setMinimumHeight(48);
-    connect(m_goLiveButton, &QPushButton::clicked, this, &OperatorWindow::onGoLiveClicked);
-
-    auto *previewLayout = new QVBoxLayout();
-    previewLayout->addWidget(makeHeaderLabel(tr("PREVIEW"), "#5dade2", this));
-    previewLayout->addWidget(m_previewPane, /*stretch=*/1);
-    previewLayout->addWidget(m_goLiveButton);
-
-    auto *previewBox = new QWidget(this);
-    previewBox->setLayout(previewLayout);
-
-    // ---------- Live pane (right) ----------
-    m_toggleOutputButton = new QPushButton(tr("Show Output Window"), this);
-    connect(m_toggleOutputButton, &QPushButton::clicked,
-            this, &OperatorWindow::onToggleOutputWindow);
-
-    auto *liveLayout = new QVBoxLayout();
-    liveLayout->addWidget(makeHeaderLabel(tr("LIVE"), "#e74c3c", this));
-    liveLayout->addWidget(m_livePreview, /*stretch=*/1);
-    liveLayout->addWidget(m_toggleOutputButton);
-
-    auto *liveBox = new QWidget(this);
-    liveBox->setLayout(liveLayout);
-
-    // ---------- Bottom transport bar ----------
-    m_prevButton = new QPushButton(tr("\u25C0\u25C0 Previous"), this);
-    m_nextButton = new QPushButton(tr("Next \u25B6\u25B6"), this);
-    m_blackButton = new QPushButton(tr("Black / Clear"), this);
-    m_blackButton->setObjectName("blackButton");
-    m_blackButton->setCheckable(true);
-
-    connect(m_prevButton, &QPushButton::clicked, m_model, &ScheduleModel::retreatLive);
-    connect(m_nextButton, &QPushButton::clicked, m_model, &ScheduleModel::advanceLive);
-    connect(m_blackButton, &QPushButton::toggled, m_model, &ScheduleModel::setBlackout);
-
-    auto *transportLayout = new QHBoxLayout();
-    transportLayout->setSpacing(12);
-    transportLayout->addWidget(m_prevButton);
-    transportLayout->addWidget(m_nextButton);
-    transportLayout->addStretch(1);
-    transportLayout->addWidget(m_blackButton);
-
-    auto *transportBox = new QWidget(this);
-    transportBox->setObjectName("transportBar");
-    transportBox->setLayout(transportLayout);
-
-    // ---------- Assemble ----------
-    auto *splitter = new QSplitter(this);
-    splitter->addWidget(m_resourceTabs);
-    splitter->addWidget(previewBox);
-    splitter->addWidget(liveBox);
-    splitter->setStretchFactor(0, 2);
-    splitter->setStretchFactor(1, 3);
-    splitter->setStretchFactor(2, 3);
-
-    auto *centralLayout = new QVBoxLayout();
-    centralLayout->setContentsMargins(6, 6, 6, 6);
-    centralLayout->addWidget(splitter, /*stretch=*/1);
-    centralLayout->addWidget(transportBox);
-
-    auto *central = new QWidget(this);
-    central->setLayout(centralLayout);
-    setCentralWidget(central);
+    buildMenuBar();
+    buildToolBar();
+    setCentralWidget(buildWorkspace());
 
     connect(m_model, &ScheduleModel::scheduleChanged, this, &OperatorWindow::onScheduleChanged);
     connect(m_model, &ScheduleModel::liveContentChanged, this, &OperatorWindow::onLiveContentChanged);
-    connect(m_model, &ScheduleModel::previewChanged, this, &OperatorWindow::onPreviewChanged);
+    connect(m_model, &ScheduleModel::previewChanged, this, &OperatorWindow::onLiveContentChanged);
 
-    // A couple of starter slides so the app isn't empty on first launch.
+    // Starter content so the app isn't empty on first launch.
     m_model->addSlide(Slide(tr("Welcome"), tr("Welcome to the service"), QColor("#1a1a2e")));
     m_model->addSlide(Slide(tr("Announcement"), tr("Coffee & fellowship after the service"), QColor("#16213e")));
 
@@ -170,6 +78,207 @@ OperatorWindow::~OperatorWindow()
     // so it won't be destroyed automatically by Qt's parent/child cleanup.
     delete m_outputWindow;
 }
+
+// ---------------------------------------------------------------------
+// Menu bar
+// ---------------------------------------------------------------------
+
+void OperatorWindow::buildMenuBar()
+{
+    QMenu *fileMenu = menuBar()->addMenu(tr("&File"));
+    QAction *actNew = fileMenu->addAction(tr("&New Schedule"));
+    connect(actNew, &QAction::triggered, this, &OperatorWindow::onNewSchedule);
+    fileMenu->addAction(makeComingSoonAction(QIcon(), tr("&Open..."), this));
+    fileMenu->addAction(makeComingSoonAction(QIcon(), tr("&Save"), this));
+    fileMenu->addSeparator();
+    fileMenu->addAction(tr("E&xit"), this, &QWidget::close);
+
+    QMenu *editMenu = menuBar()->addMenu(tr("&Edit"));
+    editMenu->addAction(makeComingSoonAction(QIcon(), tr("&Undo"), this));
+    editMenu->addAction(makeComingSoonAction(QIcon(), tr("&Redo"), this));
+
+    QMenu *liveMenu = menuBar()->addMenu(tr("&Live"));
+    QAction *actGoLiveMenu = liveMenu->addAction(tr("&Go Live"));
+    connect(actGoLiveMenu, &QAction::triggered, this, &OperatorWindow::onGoLiveAction);
+    QAction *actBlackMenu = liveMenu->addAction(tr("&Black"));
+    actBlackMenu->setCheckable(true);
+    connect(actBlackMenu, &QAction::toggled, this, &OperatorWindow::onBlackToggled);
+    QAction *actClearMenu = liveMenu->addAction(tr("&Clear"));
+    connect(actClearMenu, &QAction::triggered, this, &OperatorWindow::onClearAction);
+    // Keep the toolbar's checkable Black action and this menu action in
+    // sync in both directions.
+    m_actBlack = actBlackMenu;
+
+    QMenu *profilesMenu = menuBar()->addMenu(tr("&Profiles"));
+    profilesMenu->addAction(makeComingSoonAction(QIcon(), tr("Manage Profiles..."), this));
+
+    QMenu *viewMenu = menuBar()->addMenu(tr("&View"));
+    QAction *toggleSchedule = viewMenu->addAction(tr("Schedule Panel"));
+    toggleSchedule->setCheckable(true);
+    toggleSchedule->setChecked(true);
+    connect(toggleSchedule, &QAction::toggled, this, [this](bool visible) { m_schedulePanel->setVisible(visible); });
+
+    QAction *toggleLiveEditor = viewMenu->addAction(tr("Live Editor Panel"));
+    toggleLiveEditor->setCheckable(true);
+    toggleLiveEditor->setChecked(true);
+    connect(toggleLiveEditor, &QAction::toggled, this, [this](bool visible) { m_liveEditorPanel->setVisible(visible); });
+
+    QAction *toggleLiveOutput = viewMenu->addAction(tr("Live Output Panel"));
+    toggleLiveOutput->setCheckable(true);
+    toggleLiveOutput->setChecked(true);
+    connect(toggleLiveOutput, &QAction::toggled, this, [this](bool visible) { m_liveOutputPanel->setVisible(visible); });
+
+    QAction *toggleLibrary = viewMenu->addAction(tr("Media Library"));
+    toggleLibrary->setCheckable(true);
+    toggleLibrary->setChecked(true);
+    connect(toggleLibrary, &QAction::toggled, this, [this](bool visible) { m_mediaLibrary->setVisible(visible); });
+
+    QMenu *helpMenu = menuBar()->addMenu(tr("&Help"));
+    QAction *actAbout = helpMenu->addAction(tr("&About SanctifyLive"));
+    connect(actAbout, &QAction::triggered, this, &OperatorWindow::onAbout);
+}
+
+// ---------------------------------------------------------------------
+// Toolbar
+// ---------------------------------------------------------------------
+
+void OperatorWindow::buildToolBar()
+{
+    QToolBar *toolBar = addToolBar(tr("Main"));
+    toolBar->setMovable(false);
+    toolBar->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    toolBar->setIconSize(QSize(26, 26));
+
+    QAction *actNew = toolBar->addAction(IconFactory::newDocument(), tr("New"));
+    connect(actNew, &QAction::triggered, this, &OperatorWindow::onNewSchedule);
+    toolBar->addAction(makeComingSoonAction(IconFactory::openFolder(), tr("Open"), this));
+    toolBar->addAction(makeComingSoonAction(IconFactory::save(), tr("Save"), this));
+    toolBar->addAction(makeComingSoonAction(IconFactory::store(), tr("Store"), this));
+    toolBar->addAction(makeComingSoonAction(IconFactory::web(), tr("Web"), this));
+    toolBar->addAction(makeComingSoonAction(IconFactory::remote(), tr("Remote"), this));
+
+    toolBar->addSeparator();
+
+    auto *spacer = new QWidget(toolBar);
+    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    toolBar->addWidget(spacer);
+
+    QAction *actGoLive = toolBar->addAction(IconFactory::goLive(), tr("Go Live"));
+    connect(actGoLive, &QAction::triggered, this, &OperatorWindow::onGoLiveAction);
+
+    toolBar->addAction(makeComingSoonAction(IconFactory::alerts(), tr("Alerts"), this));
+    toolBar->addAction(makeComingSoonAction(IconFactory::logo(), tr("Logo"), this));
+
+    QAction *actBlack = toolBar->addAction(IconFactory::blackScreen(), tr("Black"));
+    actBlack->setCheckable(true);
+    connect(actBlack, &QAction::toggled, this, &OperatorWindow::onBlackToggled);
+    connect(actBlack, &QAction::toggled, m_actBlack, &QAction::setChecked);
+    connect(m_actBlack, &QAction::toggled, actBlack, &QAction::setChecked);
+
+    QAction *actClear = toolBar->addAction(IconFactory::clearScreen(), tr("Clear"));
+    connect(actClear, &QAction::triggered, this, &OperatorWindow::onClearAction);
+
+    m_actLive = toolBar->addAction(IconFactory::liveMonitor(), tr("Live"));
+    m_actLive->setCheckable(true);
+    connect(m_actLive, &QAction::toggled, this, &OperatorWindow::onLiveOutputToggled);
+}
+
+// ---------------------------------------------------------------------
+// Workspace: Schedule | Live editor | Live Output, plus the media library
+// ---------------------------------------------------------------------
+
+QWidget *OperatorWindow::buildWorkspace()
+{
+    // ---------- Schedule panel (left) ----------
+    m_scheduleList = new QListWidget(this);
+    m_scheduleList->setAlternatingRowColors(true);
+    connect(m_scheduleList, &QListWidget::currentRowChanged, this, &OperatorWindow::onScheduleRowChanged);
+
+    auto *addButton = new QPushButton(tr("+ Add Slide"), this);
+    auto *removeButton = new QPushButton(tr("Remove"), this);
+    connect(addButton, &QPushButton::clicked, this, &OperatorWindow::onAddSlideClicked);
+    connect(removeButton, &QPushButton::clicked, this, &OperatorWindow::onRemoveSlideClicked);
+
+    auto *scheduleButtons = new QHBoxLayout();
+    scheduleButtons->addWidget(addButton);
+    scheduleButtons->addWidget(removeButton);
+
+    auto *scheduleLayout = new QVBoxLayout();
+    scheduleLayout->setContentsMargins(0, 0, 0, 0);
+    scheduleLayout->setSpacing(4);
+    scheduleLayout->addWidget(makePanelHeader(tr("Schedule"), this));
+    scheduleLayout->addWidget(m_scheduleList, 1);
+    scheduleLayout->addLayout(scheduleButtons);
+
+    m_schedulePanel = new QWidget(this);
+    m_schedulePanel->setLayout(scheduleLayout);
+
+    // ---------- Live editor panel (middle) ----------
+    m_liveEditorHeader = makePanelHeader(tr("Live"), this);
+
+    auto *liveEditorLayout = new QVBoxLayout();
+    liveEditorLayout->setContentsMargins(0, 0, 0, 0);
+    liveEditorLayout->setSpacing(0);
+    liveEditorLayout->addWidget(m_liveEditorHeader);
+    liveEditorLayout->addWidget(m_liveEditorView, 1);
+
+    m_liveEditorPanel = new QWidget(this);
+    m_liveEditorPanel->setLayout(liveEditorLayout);
+
+    // ---------- Live Output panel (right) ----------
+    m_slideCounterLabel = new QLabel(this);
+    m_slideCounterLabel->setStyleSheet("color: #888; padding: 4px 8px;");
+
+    auto *prevButton = new QToolButton(this);
+    prevButton->setText(QStringLiteral("\u25C0"));
+    connect(prevButton, &QToolButton::clicked, m_model, &ScheduleModel::retreatLive);
+
+    auto *nextButton = new QToolButton(this);
+    nextButton->setText(QStringLiteral("\u25B6"));
+    connect(nextButton, &QToolButton::clicked, m_model, &ScheduleModel::advanceLive);
+
+    auto *footerLayout = new QHBoxLayout();
+    footerLayout->addWidget(m_slideCounterLabel);
+    footerLayout->addStretch(1);
+    footerLayout->addWidget(prevButton);
+    footerLayout->addWidget(nextButton);
+
+    auto *liveOutputLayout = new QVBoxLayout();
+    liveOutputLayout->setContentsMargins(0, 0, 0, 0);
+    liveOutputLayout->setSpacing(0);
+    liveOutputLayout->addWidget(makePanelHeader(tr("Live Output"), this));
+    liveOutputLayout->addWidget(m_liveOutputView, 1);
+    liveOutputLayout->addLayout(footerLayout);
+
+    m_liveOutputPanel = new QWidget(this);
+    m_liveOutputPanel->setLayout(liveOutputLayout);
+
+    // ---------- Top three-column splitter ----------
+    auto *topSplitter = new QSplitter(this);
+    topSplitter->addWidget(m_schedulePanel);
+    topSplitter->addWidget(m_liveEditorPanel);
+    topSplitter->addWidget(m_liveOutputPanel);
+    topSplitter->setStretchFactor(0, 2);
+    topSplitter->setStretchFactor(1, 3);
+    topSplitter->setStretchFactor(2, 3);
+
+    // ---------- Bottom media library ----------
+    m_mediaLibrary = new MediaLibraryPanel(this);
+    connect(m_mediaLibrary, &MediaLibraryPanel::mediaActivated, this, &OperatorWindow::onMediaActivated);
+
+    // ---------- Overall vertical split ----------
+    auto *mainSplitter = new QSplitter(Qt::Vertical, this);
+    mainSplitter->addWidget(topSplitter);
+    mainSplitter->addWidget(m_mediaLibrary);
+    mainSplitter->setStretchFactor(0, 3);
+    mainSplitter->setStretchFactor(1, 2);
+
+    return mainSplitter;
+}
+
+// ---------------------------------------------------------------------
+// Schedule actions
+// ---------------------------------------------------------------------
 
 void OperatorWindow::onAddSlideClicked()
 {
@@ -192,20 +301,20 @@ void OperatorWindow::onRemoveSlideClicked()
 
 void OperatorWindow::onScheduleRowChanged(int row)
 {
-    // Selecting a row only stages it for preview -- it must never touch
-    // what's live. This is the core HCI guarantee of the preview/live split.
-    if (row >= 0)
-        m_model->setPreviewIndex(row);
-}
-
-void OperatorWindow::onScheduleItemDoubleClicked(QListWidgetItem *item)
-{
-    Q_UNUSED(item);
+    if (row < 0)
+        return;
+    // Selecting a schedule item commits it straight to live -- see the
+    // class comment in OperatorWindow.h for why this design chose the
+    // direct (rather than staged-preview) interaction model.
+    m_model->setPreviewIndex(row);
     m_model->goLiveWithPreview();
 }
 
-void OperatorWindow::onGoLiveClicked()
+void OperatorWindow::onMediaActivated(const QString &label, const QColor &background)
 {
+    m_model->addSlide(Slide(label, label, background));
+    const int newIndex = m_model->count() - 1;
+    m_model->setPreviewIndex(newIndex);
     m_model->goLiveWithPreview();
 }
 
@@ -217,13 +326,13 @@ void OperatorWindow::onScheduleChanged()
 void OperatorWindow::onLiveContentChanged()
 {
     refreshScheduleHighlighting();
-}
+    refreshLiveOutputFooter();
 
-void OperatorWindow::onPreviewChanged()
-{
-    QSignalBlocker blocker(m_scheduleList);
-    m_scheduleList->setCurrentRow(m_model->previewIndex());
-    refreshScheduleHighlighting();
+    if (const Slide *live = m_model->liveSlide()) {
+        m_liveEditorHeader->setText(tr("Live - %1").arg(live->label));
+    } else {
+        m_liveEditorHeader->setText(tr("Live"));
+    }
 }
 
 void OperatorWindow::rebuildScheduleList()
@@ -233,16 +342,13 @@ void OperatorWindow::rebuildScheduleList()
     for (int i = 0; i < m_model->count(); ++i) {
         m_scheduleList->addItem(m_model->slideAt(i).label);
     }
-    m_scheduleList->setCurrentRow(m_model->previewIndex());
+    m_scheduleList->setCurrentRow(m_model->liveIndex());
     refreshScheduleHighlighting();
+    refreshLiveOutputFooter();
 }
 
 void OperatorWindow::refreshScheduleHighlighting()
 {
-    // Mark the live row distinctly from the preview selection: preview is
-    // shown via the normal selection highlight, live gets an explicit
-    // "ON AIR" marker so it's unambiguous even when preview and live
-    // happen to be the same row.
     for (int i = 0; i < m_scheduleList->count(); ++i) {
         QListWidgetItem *item = m_scheduleList->item(i);
         const QString baseLabel = m_model->slideAt(i).label;
@@ -256,17 +362,73 @@ void OperatorWindow::refreshScheduleHighlighting()
     }
 }
 
-void OperatorWindow::onToggleOutputWindow()
+void OperatorWindow::refreshLiveOutputFooter()
 {
-    if (m_outputWindow->isVisible()) {
-        m_outputWindow->hide();
-        m_toggleOutputButton->setText(tr("Show Output Window"));
-        return;
+    if (m_model->count() == 0) {
+        m_slideCounterLabel->setText(tr("No slides"));
+    } else {
+        m_slideCounterLabel->setText(tr("Slide %1 of %2")
+            .arg(m_model->liveIndex() + 1)
+            .arg(m_model->count()));
     }
+}
 
-    // If a second screen is connected, send the real output there and go
-    // fullscreen. Otherwise fall back to a normal window so this is still
-    // usable on a single-monitor dev machine.
+// ---------------------------------------------------------------------
+// Toolbar / menu action handlers
+// ---------------------------------------------------------------------
+
+void OperatorWindow::onNewSchedule()
+{
+    if (m_model->count() > 0) {
+        const auto reply = QMessageBox::question(
+            this, tr("New Schedule"),
+            tr("Clear the current schedule and start a new one?"),
+            QMessageBox::Yes | QMessageBox::Cancel);
+        if (reply != QMessageBox::Yes)
+            return;
+    }
+    m_model->clearAll();
+}
+
+void OperatorWindow::onGoLiveAction()
+{
+    showOutputWindow();
+    m_actLive->setChecked(true);
+}
+
+void OperatorWindow::onBlackToggled(bool checked)
+{
+    m_model->setBlackout(checked);
+}
+
+void OperatorWindow::onClearAction()
+{
+    // TODO: differentiate from Black -- Clear should eventually remove
+    // content while leaving the last background, rather than cutting to
+    // solid black. For now both land on the same safe "nothing showing"
+    // state.
+    m_model->setBlackout(true);
+    m_actBlack->setChecked(true);
+}
+
+void OperatorWindow::onLiveOutputToggled(bool checked)
+{
+    if (checked)
+        showOutputWindow();
+    else
+        hideOutputWindow();
+}
+
+void OperatorWindow::onAbout()
+{
+    QMessageBox::about(this, tr("About SanctifyLive"),
+        tr("<b>SanctifyLive</b><br>A presentation tool for churches.<br><br>"
+           "This build is an early milestone: media/song libraries are placeholders, "
+           "and the interface is being iterated on."));
+}
+
+void OperatorWindow::showOutputWindow()
+{
     const QList<QScreen *> screens = QGuiApplication::screens();
     if (screens.size() > 1) {
         QScreen *outputScreen = screens.at(1);
@@ -276,8 +438,16 @@ void OperatorWindow::onToggleOutputWindow()
         m_outputWindow->resize(960, 540);
         m_outputWindow->show();
     }
-    m_toggleOutputButton->setText(tr("Hide Output Window"));
 }
+
+void OperatorWindow::hideOutputWindow()
+{
+    m_outputWindow->hide();
+}
+
+// ---------------------------------------------------------------------
+// Window-level behavior
+// ---------------------------------------------------------------------
 
 void OperatorWindow::changeEvent(QEvent *event)
 {
@@ -285,8 +455,7 @@ void OperatorWindow::changeEvent(QEvent *event)
 
     // Whenever the operator window becomes active again, bring the output
     // window back above whatever was covering it. raise() only reorders
-    // stacking -- it does not steal keyboard focus, so the operator
-    // window keeps receiving keypresses uninterrupted.
+    // stacking -- it does not steal keyboard focus.
     if (event->type() == QEvent::ActivationChange && isActiveWindow()) {
         if (m_outputWindow->isVisible())
             m_outputWindow->raise();
@@ -295,8 +464,6 @@ void OperatorWindow::changeEvent(QEvent *event)
 
 void OperatorWindow::closeEvent(QCloseEvent *event)
 {
-    // Treat this as one application: closing the control window must
-    // never leave a bare output window orphaned on screen.
     m_outputWindow->close();
     QMainWindow::closeEvent(event);
 }
@@ -313,12 +480,8 @@ void OperatorWindow::keyPressEvent(QKeyEvent *event)
     case Qt::Key_Up:
         m_model->retreatLive();
         break;
-    case Qt::Key_Return:
-    case Qt::Key_Enter:
-        m_model->goLiveWithPreview();
-        break;
     case Qt::Key_B:
-        m_blackButton->toggle();
+        m_actBlack->toggle();
         break;
     default:
         QMainWindow::keyPressEvent(event);

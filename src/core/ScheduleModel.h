@@ -28,6 +28,7 @@ public:
 
     void addSlide(const Slide &slide);
     void removeSlideAt(int index);
+    void clearAll();
 
     int count() const;
     const Slide &slideAt(int index) const;

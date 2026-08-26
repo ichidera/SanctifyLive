@@ -4,23 +4,24 @@
 
 class QListWidget;
 class QListWidgetItem;
-class QPushButton;
 class QLabel;
-class QTabWidget;
 class ScheduleModel;
 class OutputWindow;
+class MediaLibraryPanel;
 
-// OperatorWindow is the volunteer-facing control surface. Layout follows
-// the EasyWorship/ProPresenter convention deliberately:
+// OperatorWindow: menu bar + toolbar up top, then a resizable vertical
+// split between the three-column live workspace (Schedule | Live editor
+// | Live Output) and the bottom media/resource library. Every internal
+// division is a QSplitter and every major panel has a View-menu toggle,
+// so the layout is fully rearrangeable rather than fixed.
 //
-//   [ Resource tabs: Schedule | Songs | Media | Scripture ]
-//   [ Schedule list ]   [ PREVIEW pane + Go Live ]   [ LIVE pane ]
-//   [                Transport: Prev / Next / Black                ]
-//
-// Songs/Media/Scripture tabs are visible-but-disabled placeholders for
-// now -- they exist so the panel structure is already correct when
-// those libraries are built (see build-plan steps 4-6), rather than
-// requiring a layout rework later.
+// Interaction model: selecting an item in the Schedule list (or
+// double-clicking a media item in the library) commits it straight to
+// Live -- there is no separate "staged but not live" step, matching the
+// direct schedule-builder workflow this UI is modeled on. The
+// underlying ScheduleModel still supports a two-step preview/commit
+// (setPreviewIndex + goLiveWithPreview) if a safer staged workflow is
+// wanted later; this window just chooses to call both together.
 class OperatorWindow : public QMainWindow
 {
     Q_OBJECT
@@ -37,31 +38,44 @@ protected:
 private slots:
     void onAddSlideClicked();
     void onRemoveSlideClicked();
-    void onScheduleRowChanged(int row);          // selection -> preview only
-    void onScheduleItemDoubleClicked(QListWidgetItem *item); // -> go live
-    void onGoLiveClicked();
+    void onScheduleRowChanged(int row);
+    void onMediaActivated(const QString &label, const QColor &background);
     void onLiveContentChanged();
-    void onPreviewChanged();
     void onScheduleChanged();
-    void onToggleOutputWindow();
+
+    void onNewSchedule();
+    void onGoLiveAction();
+    void onBlackToggled(bool checked);
+    void onClearAction();
+    void onLiveOutputToggled(bool checked);
+    void onAbout();
 
 private:
+    void buildMenuBar();
+    void buildToolBar();
+    QWidget *buildWorkspace();
+
     void rebuildScheduleList();
     void refreshScheduleHighlighting();
+    void refreshLiveOutputFooter();
+    void showOutputWindow();
+    void hideOutputWindow();
 
     ScheduleModel *m_model;
-    OutputWindow *m_outputWindow;   // real congregation-facing window (Live)
-    OutputWindow *m_livePreview;    // small in-app mirror of Live
-    OutputWindow *m_previewPane;    // staged-but-not-live preview
+    OutputWindow *m_outputWindow;   // real congregation-facing window
+    OutputWindow *m_liveEditorView; // "Live - <item>" mirror (middle pane)
+    OutputWindow *m_liveOutputView; // "Live Output" mirror (right pane)
+    MediaLibraryPanel *m_mediaLibrary;
 
-    QTabWidget *m_resourceTabs;
+    // Panel containers, kept as members so the View menu can toggle them.
+    QWidget *m_schedulePanel;
+    QWidget *m_liveEditorPanel;
+    QWidget *m_liveOutputPanel;
+
     QListWidget *m_scheduleList;
-    QPushButton *m_addButton;
-    QPushButton *m_removeButton;
+    QLabel *m_liveEditorHeader;
+    QLabel *m_slideCounterLabel;
 
-    QPushButton *m_goLiveButton;
-    QPushButton *m_prevButton;
-    QPushButton *m_nextButton;
-    QPushButton *m_blackButton;
-    QPushButton *m_toggleOutputButton;
+    QAction *m_actBlack;
+    QAction *m_actLive;
 };

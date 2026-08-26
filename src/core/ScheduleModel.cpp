@@ -38,6 +38,20 @@ void ScheduleModel::removeSlideAt(int index)
     emit previewChanged();
 }
 
+void ScheduleModel::clearAll()
+{
+    if (m_slides.isEmpty())
+        return;
+
+    m_slides.clear();
+    m_liveIndex = -1;
+    m_previewIndex = -1;
+
+    emit scheduleChanged();
+    emit liveContentChanged();
+    emit previewChanged();
+}
+
 int ScheduleModel::count() const
 {
     return m_slides.size();

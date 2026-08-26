@@ -19,6 +19,9 @@ add_executable(SanctifyLive
     src/core/ScheduleModel.cpp
     src/core/OutputWindow.h
     src/core/OutputWindow.cpp
+    src/core/IconFactory.h
+    src/core/MediaLibraryPanel.h
+    src/core/MediaLibraryPanel.cpp
     src/core/OperatorWindow.h
     src/core/OperatorWindow.cpp
 )
