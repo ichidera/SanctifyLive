@@ -1,4 +1,6 @@
-#pragma once
+#ifndef SANCTIFYLIVE_CORE_SLIDE_H_
+#define SANCTIFYLIVE_CORE_SLIDE_H_
+
 
 #include <QColor>
 #include <QString>
@@ -30,3 +32,5 @@ struct Slide
     {
     }
 };
+
+#endif // SANCTIFYLIVE_CORE_SLIDE_H_

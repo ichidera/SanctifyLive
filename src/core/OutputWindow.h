@@ -1,4 +1,6 @@
-#pragma once
+#ifndef SANCTIFYLIVE_CORE_OUTPUTWINDOW_H_
+#define SANCTIFYLIVE_CORE_OUTPUTWINDOW_H_
+
 
 #include <QWidget>
 
@@ -40,3 +42,5 @@ private:
     ScheduleModel *m_model;
     Source m_source;
 };
+
+#endif // SANCTIFYLIVE_CORE_OUTPUTWINDOW_H_

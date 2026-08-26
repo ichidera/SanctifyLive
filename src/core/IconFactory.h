@@ -1,4 +1,6 @@
-#pragma once
+#ifndef SANCTIFYLIVE_CORE_ICONFACTORY_H_
+#define SANCTIFYLIVE_CORE_ICONFACTORY_H_
+
 
 #include <QIcon>
 #include <QPainter>
@@ -267,3 +269,5 @@ inline QIcon treePremium(int s = 16)
     });
 }
 }
+
+#endif // SANCTIFYLIVE_CORE_ICONFACTORY_H_

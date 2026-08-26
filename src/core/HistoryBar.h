@@ -1,4 +1,6 @@
-#pragma once
+#ifndef SANCTIFYLIVE_CORE_HISTORYBAR_H_
+#define SANCTIFYLIVE_CORE_HISTORYBAR_H_
+
 
 #include <QWidget>
 
@@ -25,3 +27,5 @@ private:
     ScheduleModel *m_model;
     QHBoxLayout *m_stripLayout;
 };
+
+#endif // SANCTIFYLIVE_CORE_HISTORYBAR_H_

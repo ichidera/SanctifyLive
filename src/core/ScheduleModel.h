@@ -1,184 +1,96 @@
-#include "ScheduleModel.h"
+#ifndef SANCTIFYLIVE_CORE_SCHEDULEMODEL_H_
+#define SANCTIFYLIVE_CORE_SCHEDULEMODEL_H_
 
-ScheduleModel::ScheduleModel(QObject *parent) : QObject(parent)
+
+#include <QObject>
+#include <QVector>
+
+#include "Slide.h"
+
+// ScheduleModel separates three ideas that were previously conflated:
+//
+//   - SCHEDULE: the ordered, pre-planned list of items for the service.
+//     Nothing here changes just because something went live.
+//   - LIVE: the actual content on the output right now. It's held as a
+//     real Slide VALUE (not an index into the schedule), because
+//     content can go live without ever being added to the schedule --
+//     e.g. reaching into the media library for a one-off background.
+//   - HISTORY: a capped, most-recent-first record of everything that
+//     has been sent live, regardless of whether it came from the
+//     schedule or the media library. This is what lets an operator
+//     return to something they showed earlier without it having
+//     cluttered the schedule.
+//
+// Next/Previous still walks the schedule in order (m_scheduleCursor)
+// since that's the natural transport control during a service; sending
+// something live from the media library doesn't disturb that cursor's
+// position, it just becomes the new live content on top of it.
+class ScheduleModel : public QObject
 {
-}
+    Q_OBJECT
 
-// ---------------------------------------------------------------------
-// Schedule editing
-// ---------------------------------------------------------------------
+public:
+    explicit ScheduleModel(QObject *parent = nullptr);
 
-void ScheduleModel::addSlide(const Slide &slide)
-{
-    m_slides.append(slide);
-    // Deliberately does NOT touch live/cursor state -- adding something
-    // to the schedule is just planning, not broadcasting.
-    emit scheduleChanged();
-}
+    // --- Schedule editing ---
+    void addSlide(const Slide &slide);
+    void removeSlideAt(int index);
+    void clearAll();
+    int count() const;
+    const Slide &slideAt(int index) const;
 
-void ScheduleModel::removeSlideAt(int index)
-{
-    if (index < 0 || index >= m_slides.size())
-        return;
+    // --- Sending things live ---
+    void goLiveFromSchedule(int index);
+    void sendMediaLive(const Slide &slide);
+    void goLiveFromHistoryAt(int index);
+    void advanceLive(); // steps the schedule cursor forward and goes live with it
+    void retreatLive();
 
-    m_slides.removeAt(index);
+    void setBlackout(bool blackout);
+    void toggleBlackout();
+    bool isBlackout() const { return m_blackout; }
 
-    if (m_liveScheduleIndex == index) {
-        // The item that was live got removed from the plan; the live
-        // output keeps showing it (it's a copied value in m_liveSlide),
-        // but it's no longer attributable to a schedule row.
-        m_liveScheduleIndex = -1;
-    } else if (m_liveScheduleIndex > index) {
-        m_liveScheduleIndex--;
-    }
+    // Returns nullptr if there's no live content, OR if blacked out.
+    const Slide *liveSlide() const;
+    // Returns nullptr only if there's no live content. Ignores blackout,
+    // so an operator can always see what's actually loaded even while
+    // the audience screen is black.
+    const Slide *previewSlide() const;
 
-    if (m_scheduleCursor >= m_slides.size())
-        m_scheduleCursor = m_slides.size() - 1;
-    else if (m_scheduleCursor > index)
-        m_scheduleCursor--;
+    // -1 if the current live content did not come from the schedule
+    // (e.g. it was sent directly from the media library).
+    int liveScheduleIndex() const { return m_liveScheduleIndex; }
+    // Where Next/Previous will resume from; -1 if never navigated yet.
+    int scheduleCursor() const { return m_scheduleCursor; }
 
-    emit scheduleChanged();
-}
+    // --- History ---
+    int historyCount() const;
+    const Slide &historyAt(int index) const;
 
-void ScheduleModel::clearAll()
-{
-    if (m_slides.isEmpty())
-        return;
+    // --- Options (Edit > Options) ---
+    bool autoAddMediaToSchedule() const { return m_autoAddMediaToSchedule; }
+    void setAutoAddMediaToSchedule(bool enabled) { m_autoAddMediaToSchedule = enabled; }
 
-    m_slides.clear();
-    m_scheduleCursor = -1;
-    m_liveScheduleIndex = -1;
-    // Live output and history are intentionally left alone -- clearing
-    // the plan for a new service doesn't mean cutting whatever is
-    // currently being shown.
-    emit scheduleChanged();
-}
+signals:
+    void scheduleChanged();
+    void liveContentChanged();
+    void historyChanged();
 
-int ScheduleModel::count() const
-{
-    return m_slides.size();
-}
+private:
+    void pushHistory(const Slide &slide);
 
-const Slide &ScheduleModel::slideAt(int index) const
-{
-    return m_slides.at(index);
-}
+    QVector<Slide> m_slides;       // the schedule
+    int m_scheduleCursor = -1;     // Next/Previous position
 
-// ---------------------------------------------------------------------
-// Going live
-// ---------------------------------------------------------------------
+    Slide m_liveSlide;
+    bool m_hasLiveSlide = false;
+    int m_liveScheduleIndex = -1;  // which schedule row (if any) is live
+    bool m_blackout = false;
 
-void ScheduleModel::goLiveFromSchedule(int index)
-{
-    if (index < 0 || index >= m_slides.size())
-        return;
+    QVector<Slide> m_history;      // most-recent-first
+    bool m_autoAddMediaToSchedule = false;
 
-    m_liveSlide = m_slides.at(index);
-    m_hasLiveSlide = true;
-    m_liveScheduleIndex = index;
-    m_scheduleCursor = index;
+    static constexpr int kMaxHistory = 16;
+};
 
-    pushHistory(m_liveSlide);
-    emit liveContentChanged();
-}
-
-void ScheduleModel::sendMediaLive(const Slide &slide)
-{
-    if (m_autoAddMediaToSchedule) {
-        addSlide(slide);
-        m_liveScheduleIndex = m_slides.size() - 1;
-        m_scheduleCursor = m_liveScheduleIndex;
-    } else {
-        m_liveScheduleIndex = -1;
-    }
-
-    m_liveSlide = slide;
-    m_hasLiveSlide = true;
-
-    pushHistory(m_liveSlide);
-    emit liveContentChanged();
-}
-
-void ScheduleModel::goLiveFromHistoryAt(int index)
-{
-    if (index < 0 || index >= m_history.size())
-        return;
-
-    m_liveSlide = m_history.at(index);
-    m_hasLiveSlide = true;
-    m_liveScheduleIndex = -1; // history doesn't track schedule provenance
-
-    pushHistory(m_liveSlide); // re-promote to the front
-    emit liveContentChanged();
-}
-
-void ScheduleModel::advanceLive()
-{
-    if (m_scheduleCursor + 1 < m_slides.size())
-        goLiveFromSchedule(m_scheduleCursor + 1);
-}
-
-void ScheduleModel::retreatLive()
-{
-    if (m_scheduleCursor - 1 >= 0)
-        goLiveFromSchedule(m_scheduleCursor - 1);
-}
-
-void ScheduleModel::setBlackout(bool blackout)
-{
-    if (m_blackout == blackout)
-        return;
-    m_blackout = blackout;
-    emit liveContentChanged();
-}
-
-void ScheduleModel::toggleBlackout()
-{
-    setBlackout(!m_blackout);
-}
-
-const Slide *ScheduleModel::liveSlide() const
-{
-    if (m_blackout || !m_hasLiveSlide)
-        return nullptr;
-    return &m_liveSlide;
-}
-
-const Slide *ScheduleModel::previewSlide() const
-{
-    if (!m_hasLiveSlide)
-        return nullptr;
-    return &m_liveSlide;
-}
-
-// ---------------------------------------------------------------------
-// History
-// ---------------------------------------------------------------------
-
-int ScheduleModel::historyCount() const
-{
-    return m_history.size();
-}
-
-const Slide &ScheduleModel::historyAt(int index) const
-{
-    return m_history.at(index);
-}
-
-void ScheduleModel::pushHistory(const Slide &slide)
-{
-    // De-dupe by label so repeatedly re-showing the same item doesn't
-    // spam the strip with copies -- move it to the front instead.
-    for (int i = 0; i < m_history.size(); ++i) {
-        if (m_history.at(i).label == slide.label) {
-            m_history.removeAt(i);
-            break;
-        }
-    }
-
-    m_history.prepend(slide);
-    while (m_history.size() > kMaxHistory)
-        m_history.removeLast();
-
-    emit historyChanged();
-}
+#endif // SANCTIFYLIVE_CORE_SCHEDULEMODEL_H_

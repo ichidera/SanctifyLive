@@ -1,4 +1,6 @@
-#pragma once
+#ifndef SANCTIFYLIVE_CORE_MEDIALIBRARYPANEL_H_
+#define SANCTIFYLIVE_CORE_MEDIALIBRARYPANEL_H_
+
 
 #include <QColor>
 #include <QWidget>
@@ -69,3 +71,5 @@ private:
     QString m_currentCategory;
     QMap<QString, QVector<MediaEntry>> m_sampleData;
 };
+
+#endif // SANCTIFYLIVE_CORE_MEDIALIBRARYPANEL_H_

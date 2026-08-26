@@ -1,4 +1,6 @@
-#pragma once
+#ifndef SANCTIFYLIVE_CORE_OPERATORWINDOW_H_
+#define SANCTIFYLIVE_CORE_OPERATORWINDOW_H_
+
 
 #include <QMainWindow>
 
@@ -83,3 +85,5 @@ private:
     QAction *m_actBlack;
     QAction *m_actLive;
 };
+
+#endif // SANCTIFYLIVE_CORE_OPERATORWINDOW_H_
