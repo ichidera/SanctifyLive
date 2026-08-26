@@ -5,3 +5,4 @@ out/
 *.user
 SanctifyLive.zip
 docs/
+*.log
