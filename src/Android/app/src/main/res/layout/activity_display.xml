@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <!-- The slide canvas — fills all available space -->
+    <com.sanctifylive.display.SlideView
+        android:id="@+id/slideView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Disconnected banner — visible only when socket is not connected -->
+    <TextView
+        android:id="@+id/tvStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="16dp"
+        android:text="⬤  Disconnected"
+        android:textColor="#CCFF4444"
+        android:textSize="12sp"
+        android:fontFamily="monospace"
+        android:visibility="visible" />
+
+    <!-- Settings FAB — triple-tap anywhere to show, auto-hides after 5 s -->
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fabSettings"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="24dp"
+        android:src="@android:drawable/ic_menu_preferences"
+        android:contentDescription="Settings"
+        android:visibility="gone" />
+
+</FrameLayout>

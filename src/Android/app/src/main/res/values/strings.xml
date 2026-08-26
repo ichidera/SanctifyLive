@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SanctifyLive Display</string>
+    <string name="status_connected">⬤  Connected</string>
+    <string name="status_disconnected">⬤  Disconnected</string>
+    <string name="status_reconnecting">⬤  Reconnecting…</string>
+    <string name="pref_host">pref_host</string>
+    <string name="pref_port">pref_port</string>
+    <string name="default_host">127.0.0.1</string>
+    <string name="default_port">55432</string>
+</resources>
