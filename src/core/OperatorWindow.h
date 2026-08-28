@@ -11,6 +11,7 @@ class ScheduleModel;
 class OutputWindow;
 class MediaLibraryPanel;
 class HistoryBar;
+class SlideServer;
 
 // OperatorWindow: menu bar + toolbar up top, a History strip, then a
 // resizable vertical split between the three-column live workspace
@@ -26,6 +27,12 @@ class HistoryBar;
 // the old behavior. Whatever goes live -- from the Schedule or the
 // library -- is recorded in the History strip regardless, so the
 // operator can always get back to something they showed.
+//
+// This window also owns the SlideServer, which mirrors live content to
+// any connected Android stage-display devices over the local network
+// (see src/android/PROTOCOL.md and src/core/SlideServer.h). A status
+// bar label shows the listening address and how many devices are
+// connected.
 class OperatorWindow : public QMainWindow
 {
     Q_OBJECT
@@ -54,6 +61,7 @@ private slots:
     void onLiveOutputToggled(bool checked);
     void onEditOptions();
     void onAbout();
+    void onDisplayClientCountChanged(int count);
 
 private:
     void buildMenuBar();
@@ -65,6 +73,7 @@ private:
     void refreshLiveOutputFooter();
     void showOutputWindow();
     void hideOutputWindow();
+    QString localNetworkStatusText(int clientCount) const;
 
     ScheduleModel *m_model;
     OutputWindow *m_outputWindow;   // real congregation-facing window
@@ -72,6 +81,7 @@ private:
     OutputWindow *m_liveOutputView; // "Live Output" mirror (right pane)
     MediaLibraryPanel *m_mediaLibrary;
     HistoryBar *m_historyBar;
+    SlideServer *m_slideServer;
 
     // Panel containers, kept as members so the View menu can toggle them.
     QWidget *m_schedulePanel;
@@ -81,6 +91,7 @@ private:
     QListWidget *m_scheduleList;
     QLabel *m_liveEditorHeader;
     QLabel *m_slideCounterLabel;
+    QLabel *m_networkStatusLabel;
 
     QAction *m_actBlack;
     QAction *m_actLive;

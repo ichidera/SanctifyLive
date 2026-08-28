@@ -10,7 +10,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
 
 add_executable(SanctifyLive
     src/main.cpp
@@ -24,13 +24,15 @@ add_executable(SanctifyLive
     src/core/MediaLibraryPanel.cpp
     src/core/HistoryBar.h
     src/core/HistoryBar.cpp
+    src/core/SlideServer.h
+    src/core/SlideServer.cpp
     src/core/OperatorWindow.h
     src/core/OperatorWindow.cpp
 )
 
 target_include_directories(SanctifyLive PRIVATE src)
 
-target_link_libraries(SanctifyLive PRIVATE Qt6::Widgets)
+target_link_libraries(SanctifyLive PRIVATE Qt6::Widgets Qt6::Network)
 
 # Keep warnings visible during early development rather than silencing them.
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

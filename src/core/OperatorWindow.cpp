@@ -16,9 +16,11 @@
 #include <QListWidget>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QNetworkInterface>
 #include <QPushButton>
 #include <QScreen>
 #include <QSplitter>
+#include <QStatusBar>
 #include <QToolBar>
 #include <QToolButton>
 
@@ -27,6 +29,7 @@
 #include "MediaLibraryPanel.h"
 #include "OutputWindow.h"
 #include "ScheduleModel.h"
+#include "SlideServer.h"
 
 namespace {
 QLabel *makePanelHeader(const QString &text, QWidget *parent)
@@ -48,6 +51,21 @@ QAction *makeComingSoonAction(const QIcon &icon, const QString &text, QObject *p
     action->setToolTip(QObject::tr("Coming in a future update"));
     return action;
 }
+
+// Best-effort guess at the machine's LAN-facing IPv4 address, purely so
+// the status bar can tell the operator what to type into the Android
+// app -- see src/android/PROTOCOL.md. Not authoritative: a machine with
+// multiple adapters (VPN, virtual switches, etc.) may have several
+// candidates; this just picks the first plausible one rather than
+// trying to be clever about routing.
+QString firstLanIPv4Address()
+{
+    for (const QHostAddress &address : QNetworkInterface::allAddresses()) {
+        if (address.protocol() == QAbstractSocket::IPv4Protocol && !address.isLoopback())
+            return address.toString();
+    }
+    return QObject::tr("(no network)");
+}
 }
 
 OperatorWindow::OperatorWindow(QWidget *parent)
@@ -66,6 +84,19 @@ OperatorWindow::OperatorWindow(QWidget *parent)
     m_historyBar = new HistoryBar(m_model, this);
     setCentralWidget(buildWorkspace());
 
+    m_slideServer = new SlideServer(m_model, this);
+    connect(m_slideServer, &SlideServer::clientCountChanged,
+            this, &OperatorWindow::onDisplayClientCountChanged);
+
+    m_networkStatusLabel = new QLabel(this);
+    statusBar()->addPermanentWidget(m_networkStatusLabel);
+
+    if (m_slideServer->start()) {
+        onDisplayClientCountChanged(0);
+    } else {
+        m_networkStatusLabel->setText(tr("Display server: failed to start (port in use?)"));
+    }
+
     connect(m_model, &ScheduleModel::scheduleChanged, this, &OperatorWindow::onScheduleChanged);
     connect(m_model, &ScheduleModel::liveContentChanged, this, &OperatorWindow::onLiveContentChanged);
 
@@ -78,6 +109,8 @@ OperatorWindow::OperatorWindow(QWidget *parent)
 
 OperatorWindow::~OperatorWindow()
 {
+    m_slideServer->stop();
+
     // m_outputWindow has no parent (it's a real top-level window so it can
     // be moved to a second monitor independent of the operator window),
     // so it won't be destroyed automatically by Qt's parent/child cleanup.
@@ -464,6 +497,22 @@ void OperatorWindow::onAbout()
         tr("<b>SanctifyLive</b><br>A presentation tool for churches.<br><br>"
            "This build is an early milestone: media/song libraries are placeholders, "
            "and the interface is being iterated on."));
+}
+
+void OperatorWindow::onDisplayClientCountChanged(int count)
+{
+    m_networkStatusLabel->setText(localNetworkStatusText(count));
+}
+
+QString OperatorWindow::localNetworkStatusText(int clientCount) const
+{
+    const QString address = firstLanIPv4Address();
+    const QString deviceWord = (clientCount == 1) ? tr("device") : tr("devices");
+    return tr("Stage Display: %1:%2  \u2022  %3 %4 connected")
+        .arg(address)
+        .arg(m_slideServer->port())
+        .arg(clientCount)
+        .arg(deviceWord);
 }
 
 void OperatorWindow::showOutputWindow()
