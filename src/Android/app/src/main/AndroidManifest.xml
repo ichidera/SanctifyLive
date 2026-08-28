@@ -17,24 +17,24 @@
         android:theme="@style/Theme.SanctifyDisplay"
         android:hardwareAccelerated="true">
 
+        <!--
+          Full-screen, immersive, always-on stage display:
+          - windowSoftInputMode: no on-screen keyboard should ever pop up
+          - screenOrientation: landscape, matching how a stage display sits
+          - configChanges: absorb rotation/size changes ourselves so the
+            activity doesn't restart and drop the live TCP connection
+          - keepScreenOn / showWhenLocked / turnScreenOn: this tablet is
+            meant to sit at the pulpit permanently displaying content
+        -->
         <activity
             android:name=".DisplayActivity"
             android:exported="true"
             android:launchMode="singleInstance"
-
-            <!-- Full-screen, immersive, hide nav bar, hide status bar -->
             android:windowSoftInputMode="stateAlwaysHidden"
             android:screenOrientation="landscape"
-
-            <!-- Prevent config changes from restarting — keeps socket alive on rotate -->
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|uiMode"
-
-            <!-- Keep screen on -->
             android:keepScreenOn="true"
-
-            <!-- Exclude from recents so it's harder to accidentally swipe away -->
             android:excludeFromRecents="false"
-
             android:showWhenLocked="true"
             android:turnScreenOn="true">
 

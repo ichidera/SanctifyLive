@@ -33,6 +33,11 @@ public class SlideClient {
     private static final String TAG               = "SlideClient";
     private static final int    CONNECT_TIMEOUT   = 5_000;  // ms
     private static final int    RECONNECT_DELAY   = 3_000;  // ms
+    // Must comfortably exceed the server's actual ping interval (15 s, see
+    // SlideServer.cpp's kPingIntervalMs) with room for a couple of missed
+    // or delayed pings from network jitter -- otherwise a perfectly healthy,
+    // idle connection gets falsely treated as dropped on a timer.
+    private static final int    SOCKET_READ_TIMEOUT = 40_000;  // ms
 
     // ── Callback interface ────────────────────────────────────────────────
 
@@ -109,7 +114,7 @@ public class SlideClient {
     private void connectAndRead() throws IOException {
         Socket s = new Socket();
         s.setTcpNoDelay(true);
-        s.setSoTimeout(10_000);   // 10 s read timeout; server pings every 2 s
+        s.setSoTimeout(SOCKET_READ_TIMEOUT);
         s.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT);
 
         synchronized (this) { socket = s; }

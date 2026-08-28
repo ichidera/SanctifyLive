@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Plain circular background for the settings button, standing in for a
+    Material Components FAB without requiring that dependency. Color
+    matches the desktop app's accent blue (#2d8cf0) so the two halves of
+    SanctifyLive feel like one product.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#2D8CF0" />
+</shape>

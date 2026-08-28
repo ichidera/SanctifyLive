@@ -1,6 +1,7 @@
 package com.sanctifylive.display;
 
 import android.app.AlertDialog;
+import android.app.Activity;
 import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.graphics.Color;
@@ -8,7 +9,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
@@ -16,10 +16,6 @@ import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
-import android.widget.TextView;
-import android.widget.Toast;
-
-import androidx.appcompat.app.AppCompatActivity;
 
 import com.sanctifylive.display.databinding.ActivityDisplayBinding;
 
@@ -34,8 +30,13 @@ import com.sanctifylive.display.databinding.ActivityDisplayBinding;
  *   4. Deliver slide frames to SlideView.
  *   5. Provide a triple-tap gesture to surface the settings dialog,
  *      which auto-hides after 5 seconds so it never lingers.
+ *
+ * Extends plain Activity rather than AppCompatActivity: nothing here uses
+ * an ActionBar or any other AppCompat-specific API, and build.gradle has
+ * no third-party dependencies on purpose (see its comment) -- pulling in
+ * AndroidX just for the base class isn't worth it.
  */
-public class DisplayActivity extends AppCompatActivity implements SlideClient.Listener {
+public class DisplayActivity extends Activity implements SlideClient.Listener {
 
     // ── Constants ─────────────────────────────────────────────────────────
 
@@ -47,7 +48,6 @@ public class DisplayActivity extends AppCompatActivity implements SlideClient.Li
     private ActivityDisplayBinding binding;
     private SlideClient            client;
     private Handler                handler;
-    private GestureDetector        gestureDetector;
 
     private int  tapCount   = 0;
     private long lastTapMs  = 0;
@@ -78,17 +78,18 @@ public class DisplayActivity extends AppCompatActivity implements SlideClient.Li
         // Immersive fullscreen
         enterImmersiveMode();
 
-        // Triple-tap anywhere → settings
-        gestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
-            @Override
-            public boolean onSingleTapConfirmed(MotionEvent e) {
-                handleTap();
-                return true;
-            }
-        });
-
+        // Triple-tap anywhere → settings. Deliberately NOT using
+        // GestureDetector.onSingleTapConfirmed here: that callback exists
+        // to disambiguate a single tap from the start of a double-tap, so
+        // when taps arrive quickly (exactly what a real "triple tap"
+        // looks like), the detector's own double-tap window can absorb
+        // taps 1+2 as a double-tap and never report them as confirmed
+        // singles -- tapCount then never reliably reaches 3. Counting raw
+        // ACTION_DOWN events ourselves is deterministic regardless of tap speed.
         binding.getRoot().setOnTouchListener((v, event) -> {
-            gestureDetector.onTouchEvent(event);
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                handleTap();
+            }
             return true;
         });
 

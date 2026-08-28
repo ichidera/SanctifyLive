@@ -24,14 +24,22 @@
         android:fontFamily="monospace"
         android:visibility="visible" />
 
-    <!-- Settings FAB — triple-tap anywhere to show, auto-hides after 5 s -->
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
+    <!-- Settings button — triple-tap anywhere to show, auto-hides after 5 s.
+         Plain ImageButton + a circular drawable rather than a Material
+         Components FloatingActionButton: build.gradle deliberately has no
+         third-party dependencies, so pulling in the Material library just
+         for this one button isn't worth it. -->
+    <ImageButton
         android:id="@+id/fabSettings"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
         android:layout_gravity="bottom|end"
         android:layout_margin="24dp"
+        android:background="@drawable/bg_fab_circle"
+        android:padding="14dp"
+        android:elevation="6dp"
         android:src="@android:drawable/ic_menu_preferences"
+        android:tint="#FFFFFF"
         android:contentDescription="Settings"
         android:visibility="gone" />
 
