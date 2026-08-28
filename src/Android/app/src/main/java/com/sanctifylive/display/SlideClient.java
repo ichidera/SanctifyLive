@@ -1,7 +1,10 @@
 package com.sanctifylive.display;
 
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Base64;
 import android.util.Log;
 
 import org.json.JSONObject;
@@ -44,9 +47,18 @@ public class SlideClient {
     public interface Listener {
         void onConnected();
         void onDisconnected();
-        /** bg and fg are packed ARGB ints (Color.parseColor output). */
-        void onSlide(String text, int bg, int fg);
+        /**
+         * bg and fg are packed ARGB ints (Color.parseColor output).
+         * image is non-null only when the server's frame carried a
+         * background image (see PROTOCOL.md); already decoded to a
+         * Bitmap on the IO thread so the callback never blocks the
+         * caller decoding it itself. When null, render the solid bg
+         * color as before.
+         */
+        void onSlide(String text, int bg, int fg, Bitmap image);
         void onBlackout();
+        /** Force the screen on and to the front, even over the lock screen. */
+        void onWake();
     }
 
     // ── Fields ────────────────────────────────────────────────────────────
@@ -145,11 +157,20 @@ public class SlideClient {
                     String fgStr = obj.optString("fg", "#ffffff");
                     int bg = parseColor(bgStr, 0xFF000000);
                     int fg = parseColor(fgStr, 0xFFFFFFFF);
-                    fireSlide(text, bg, fg);
+                    // Decode here, on the IO thread, rather than posting
+                    // the raw base64/bytes to the main thread and decoding
+                    // there -- JPEG decode is the slow part of handling an
+                    // image frame, and this keeps it off the UI thread so
+                    // it can never show up as a frozen display.
+                    Bitmap image = obj.has("image") ? decodeImage(obj.optString("image", "")) : null;
+                    fireSlide(text, bg, fg, image);
                     break;
                 }
                 case "blackout":
                     fireBlackout();
+                    break;
+                case "wake":
+                    fireWake();
                     break;
                 case "ping":
                     // keepalive — no action needed
@@ -183,12 +204,25 @@ public class SlideClient {
         }
     }
 
+    /** Returns null on any decode failure -- caller falls back to the solid bg color. */
+    private static Bitmap decodeImage(String base64) {
+        if (base64.isEmpty()) return null;
+        try {
+            byte[] bytes = Base64.decode(base64, Base64.DEFAULT);
+            return BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+        } catch (Exception e) {
+            Log.w(TAG, "Bad image frame — " + e.getMessage());
+            return null;
+        }
+    }
+
     // ── Callbacks (always on main thread) ─────────────────────────────────
 
     private void fireConnected()  { mainHandler.post(() -> { if (listener != null) listener.onConnected(); }); }
     private void fireDisconnected() { mainHandler.post(() -> { if (listener != null) listener.onDisconnected(); }); }
     private void fireBlackout()   { mainHandler.post(() -> { if (listener != null) listener.onBlackout(); }); }
-    private void fireSlide(String text, int bg, int fg) {
-        mainHandler.post(() -> { if (listener != null) listener.onSlide(text, bg, fg); });
+    private void fireWake()       { mainHandler.post(() -> { if (listener != null) listener.onWake(); }); }
+    private void fireSlide(String text, int bg, int fg, Bitmap image) {
+        mainHandler.post(() -> { if (listener != null) listener.onSlide(text, bg, fg, image); });
     }
 }

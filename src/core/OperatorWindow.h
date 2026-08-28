@@ -7,6 +7,7 @@
 class QListWidget;
 class QListWidgetItem;
 class QLabel;
+class QPushButton;
 class ScheduleModel;
 class OutputWindow;
 class MediaLibraryPanel;
@@ -32,7 +33,10 @@ class SlideServer;
 // any connected Android stage-display devices over the local network
 // (see src/android/PROTOCOL.md and src/core/SlideServer.h). A status
 // bar label shows the listening address and how many devices are
-// connected.
+// connected, alongside a "Wake Display" button (enabled only while a
+// device is connected) that forces a sleeping/locked tablet's screen
+// back on -- for when it's timed out or been put to sleep and the
+// operator would otherwise have to walk over and tap it.
 class OperatorWindow : public QMainWindow
 {
     Q_OBJECT
@@ -62,6 +66,7 @@ private slots:
     void onEditOptions();
     void onAbout();
     void onDisplayClientCountChanged(int count);
+    void onWakeDisplayClicked();
 
 private:
     void buildMenuBar();
@@ -92,6 +97,7 @@ private:
     QLabel *m_liveEditorHeader;
     QLabel *m_slideCounterLabel;
     QLabel *m_networkStatusLabel;
+    QPushButton *m_wakeDisplayButton; // status bar; enabled only while >=1 device connected
 
     QAction *m_actBlack;
     QAction *m_actLive;

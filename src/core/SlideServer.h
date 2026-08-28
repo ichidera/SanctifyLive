@@ -1,6 +1,8 @@
 #ifndef SANCTIFYLIVE_CORE_SLIDESERVER_H_
 #define SANCTIFYLIVE_CORE_SLIDESERVER_H_
 
+#include <QDateTime>
+#include <QHash>
 #include <QObject>
 #include <QSet>
 #include <QTcpServer>
@@ -21,11 +23,11 @@ class ScheduleModel;
 // second Android client, a web remote, or anything else that speaks
 // this protocol.
 //
-// KNOWN LIMITATION: the protocol only carries text + solid bg/fg colors.
-// A live slide with a real background image (see Slide::backgroundImagePath)
-// currently reaches Android clients as just its fallback color with no
-// image -- image support would need a new frame type and is out of
-// scope until the Android app can decode/cache images over the wire.
+// Background images (see Slide::backgroundImagePath) are sent to clients
+// as a downsampled, JPEG-encoded, base64 "image" field on the slide frame
+// -- see PROTOCOL.md. Encoded images are cached by (path, last-modified)
+// so re-broadcasting the same live slide (e.g. a ping-triggered resend,
+// or a second client connecting) never re-decodes/re-encodes the file.
 class SlideServer : public QObject
 {
     Q_OBJECT
@@ -41,6 +43,11 @@ public:
     bool isListening() const;
     quint16 port() const;
     int clientCount() const;
+
+    // Forces every connected client's screen on and to the front, even
+    // over its lock screen. On-demand only (see OperatorWindow's "Wake
+    // Display" status bar button) -- the server never sends this itself.
+    void wakeAll();
 
 signals:
     // Fired whenever a client connects or disconnects, so the UI can
@@ -58,11 +65,21 @@ private:
     QByteArray currentFrame() const;
     QByteArray buildSlideFrame() const;
     QByteArray buildBlackoutFrame() const;
+    QByteArray buildWakeFrame() const;
+    QString encodedImageFor(const QString &path) const;
 
     ScheduleModel *m_model;
     QTcpServer *m_server;
     QSet<QTcpSocket *> m_clients;
     QTimer *m_pingTimer;
+
+    // One-entry cache of the last background image we base64-encoded,
+    // keyed by file path + last-modified time so an edited-and-reimported
+    // file (same path, new content) is correctly re-encoded. mutable
+    // because encoding happens lazily from const frame-building methods.
+    mutable QString m_cachedImagePath;
+    mutable QDateTime m_cachedImageModified;
+    mutable QString m_cachedImageBase64;
 };
 
 #endif // SANCTIFYLIVE_CORE_SLIDESERVER_H_

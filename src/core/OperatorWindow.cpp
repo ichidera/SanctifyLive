@@ -91,6 +91,17 @@ OperatorWindow::OperatorWindow(QWidget *parent)
     m_networkStatusLabel = new QLabel(this);
     statusBar()->addPermanentWidget(m_networkStatusLabel);
 
+    // Lets the operator force a connected tablet's screen back on without
+    // walking over to tap it -- see SlideServer::wakeAll(). Disabled
+    // whenever no device is connected, since there's nothing to wake.
+    m_wakeDisplayButton = new QPushButton(tr("Wake Display"), this);
+    m_wakeDisplayButton->setToolTip(
+        tr("Force the connected display's screen on, even if it's locked or asleep"));
+    m_wakeDisplayButton->setEnabled(false);
+    connect(m_wakeDisplayButton, &QPushButton::clicked,
+            this, &OperatorWindow::onWakeDisplayClicked);
+    statusBar()->addPermanentWidget(m_wakeDisplayButton);
+
     if (m_slideServer->start()) {
         onDisplayClientCountChanged(0);
     } else {
@@ -502,6 +513,12 @@ void OperatorWindow::onAbout()
 void OperatorWindow::onDisplayClientCountChanged(int count)
 {
     m_networkStatusLabel->setText(localNetworkStatusText(count));
+    m_wakeDisplayButton->setEnabled(count > 0);
+}
+
+void OperatorWindow::onWakeDisplayClicked()
+{
+    m_slideServer->wakeAll();
 }
 
 QString OperatorWindow::localNetworkStatusText(int clientCount) const

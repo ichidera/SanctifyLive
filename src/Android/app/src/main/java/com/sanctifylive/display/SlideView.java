@@ -1,6 +1,7 @@
 package com.sanctifylive.display;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -13,7 +14,8 @@ import android.view.View;
  * SlideView — mirrors OutputWindow from the Qt desktop exactly.
  *
  * Rules (matching OutputWindow.cpp):
- *   - Fill entire surface with slide background color.
+ *   - Fill entire surface with slide background color, or a background
+ *     image (cover-fit, cropped to fill) when the frame carried one.
  *   - If text is empty, do nothing further.
  *   - Font size = max(12sp, height / 8) — bold, white, centered, word-wrapped.
  *   - No slide (blackout): fill black, nothing else.
@@ -27,11 +29,15 @@ public class SlideView extends View {
     private int     bgColor  = Color.BLACK;
     private String  text     = null;   // null == blackout / no slide
     private int     fgColor  = Color.WHITE;
+    private Bitmap  bgImage  = null;   // null == no image; draw solid bgColor instead
 
     // ── Paint ─────────────────────────────────────────────────────────────
-    private final Paint bgPaint  = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint txtPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Rect  drawRect = new Rect();
+    private final Paint bgPaint   = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint txtPaint  = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint imagePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final Rect  drawRect  = new Rect();
+    private final Rect  imageSrcRect = new Rect();
+    private final Rect  imageDstRect = new Rect();
 
     // ── Construction ──────────────────────────────────────────────────────
 
@@ -57,11 +63,18 @@ public class SlideView extends View {
 
     // ── Public API ────────────────────────────────────────────────────────
 
-    /** Called when the server pushes a new live slide. */
-    public void setSlide(String slideText, int backgroundColor, int foregroundColor) {
+    /**
+     * Called when the server pushes a new live slide. backgroundImage is
+     * null unless the frame carried one (see PROTOCOL.md's "image"
+     * field) -- when present it's drawn cover-fit instead of the solid
+     * backgroundColor, matching OutputWindow.cpp's paintEvent.
+     */
+    public void setSlide(String slideText, int backgroundColor, int foregroundColor,
+                          Bitmap backgroundImage) {
         this.text    = slideText;
         this.bgColor = backgroundColor;
         this.fgColor = foregroundColor;
+        this.bgImage = backgroundImage;
         postInvalidate();   // safe to call from any thread
     }
 
@@ -69,6 +82,7 @@ public class SlideView extends View {
     public void setBlackout() {
         this.text    = null;
         this.bgColor = Color.BLACK;
+        this.bgImage = null;
         postInvalidate();
     }
 
@@ -81,9 +95,13 @@ public class SlideView extends View {
         int w = getWidth();
         int h = getHeight();
 
-        // Fill background (black if blackout, slide color otherwise)
-        bgPaint.setColor(bgColor);
-        canvas.drawRect(0, 0, w, h, bgPaint);
+        if (bgImage != null && !bgImage.isRecycled() && w > 0 && h > 0) {
+            drawCoverFit(canvas, bgImage, w, h);
+        } else {
+            // Fill background (black if blackout, slide color otherwise)
+            bgPaint.setColor(bgColor);
+            canvas.drawRect(0, 0, w, h, bgPaint);
+        }
 
         // No text (blackout or empty slide) — stop here
         if (text == null || text.isEmpty()) return;
@@ -101,6 +119,38 @@ public class SlideView extends View {
         drawRect.set(pad, pad, w - pad, h - pad);
 
         drawTextWrapped(canvas, text, drawRect, txtPaint);
+    }
+
+    /**
+     * Draws bgImage scaled to fill the w×h surface, cropping any
+     * overflow -- CSS background-size: cover, same idea as
+     * OutputWindow.cpp's Qt::KeepAspectRatioByExpanding + centered
+     * source-rect crop. Cheaper than pre-scaling the whole bitmap:
+     * drawBitmap(src, dst) lets the GPU do the scale, so we only need
+     * to compute which centered crop of the source to sample from.
+     */
+    private void drawCoverFit(Canvas canvas, Bitmap bitmap, int w, int h) {
+        float bitmapAspect = (float) bitmap.getWidth() / bitmap.getHeight();
+        float viewAspect = (float) w / h;
+
+        int srcW, srcH, srcX, srcY;
+        if (bitmapAspect > viewAspect) {
+            // Bitmap is relatively wider than the view -- crop its sides.
+            srcH = bitmap.getHeight();
+            srcW = Math.round(srcH * viewAspect);
+            srcX = (bitmap.getWidth() - srcW) / 2;
+            srcY = 0;
+        } else {
+            // Bitmap is relatively taller than the view -- crop top/bottom.
+            srcW = bitmap.getWidth();
+            srcH = Math.round(srcW / viewAspect);
+            srcX = 0;
+            srcY = (bitmap.getHeight() - srcH) / 2;
+        }
+
+        imageSrcRect.set(srcX, srcY, srcX + srcW, srcY + srcH);
+        imageDstRect.set(0, 0, w, h);
+        canvas.drawBitmap(bitmap, imageSrcRect, imageDstRect, imagePaint);
     }
 
     /**

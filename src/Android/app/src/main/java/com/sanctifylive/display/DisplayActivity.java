@@ -2,13 +2,16 @@ package com.sanctifylive.display;
 
 import android.app.AlertDialog;
 import android.app.Activity;
+import android.app.KeyguardManager;
 import android.content.Context;
 import android.content.pm.ActivityInfo;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
@@ -30,6 +33,11 @@ import com.sanctifylive.display.databinding.ActivityDisplayBinding;
  *   4. Deliver slide frames to SlideView.
  *   5. Provide a triple-tap gesture to surface the settings dialog,
  *      which auto-hides after 5 seconds so it never lingers.
+ *   6. On a server "wake" frame, force the screen back on and to the
+ *      front even over the lock screen -- the always-on-while-resumed
+ *      manifest flags don't by themselves undo a physical power-button
+ *      sleep or an idle timeout, so this is the operator's manual
+ *      override for that (see the "Wake Display" status bar button).
  *
  * Extends plain Activity rather than AppCompatActivity: nothing here uses
  * an ActionBar or any other AppCompat-specific API, and build.gradle has
@@ -142,13 +150,48 @@ public class DisplayActivity extends Activity implements SlideClient.Listener {
     }
 
     @Override
-    public void onSlide(String text, int bg, int fg) {
-        binding.slideView.setSlide(text, bg, fg);
+    public void onSlide(String text, int bg, int fg, Bitmap image) {
+        binding.slideView.setSlide(text, bg, fg, image);
     }
 
     @Override
     public void onBlackout() {
         binding.slideView.setBlackout();
+    }
+
+    @Override
+    public void onWake() {
+        // Manifest-level showWhenLocked/turnScreenOn only apply when this
+        // activity is (re)started or resumed -- they don't reach back and
+        // wake a screen that's already gone to sleep while we sat idle in
+        // the background. Setting the flags again here plus a brief,
+        // wake-causing PowerManager lock is what actually lights the
+        // screen up on demand.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true);
+            setTurnScreenOn(true);
+            KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+            if (km != null) km.requestDismissKeyguard(this, null);
+        } else {
+            //noinspection deprecation
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                    | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                    | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
+        }
+
+        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        if (pm != null) {
+            @SuppressWarnings("deprecation")
+            PowerManager.WakeLock wakeLock = pm.newWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP
+                            | PowerManager.ON_AFTER_RELEASE,
+                    "SanctifyLive:wakeDisplay");
+            // Auto-releases -- this only needs to nudge the screen on;
+            // the manifest's keepScreenOn keeps it on from there.
+            wakeLock.acquire(3_000);
+        }
+
+        enterImmersiveMode();
     }
 
     // ── Immersive fullscreen ───────────────────────────────────────────────
