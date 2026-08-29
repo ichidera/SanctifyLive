@@ -10,7 +10,10 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Network Sql)
+# Sql: BibleLibrary reads resources/scripture/bibles.sqlite.
+# Concurrent: SlideServer decodes/encodes background images on a worker
+# thread (QtConcurrent::run) instead of blocking the GUI thread.
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network Sql Concurrent)
 
 add_executable(SanctifyLive
     src/main.cpp
@@ -22,6 +25,8 @@ add_executable(SanctifyLive
     src/core/IconFactory.h
     src/core/MediaLibraryPanel.h
     src/core/MediaLibraryPanel.cpp
+    src/core/ImageFramingDialog.h
+    src/core/ImageFramingDialog.cpp
     src/core/scripture/BibleLibrary.h
     src/core/scripture/BibleLibrary.cpp
     src/core/scripture/ScripturePanel.h
@@ -30,13 +35,15 @@ add_executable(SanctifyLive
     src/core/HistoryBar.cpp
     src/core/SlideServer.h
     src/core/SlideServer.cpp
+    src/core/SettingsWindow.h
+    src/core/SettingsWindow.cpp
     src/core/OperatorWindow.h
     src/core/OperatorWindow.cpp
 )
 
 target_include_directories(SanctifyLive PRIVATE src)
 
-target_link_libraries(SanctifyLive PRIVATE Qt6::Widgets Qt6::Network Qt6::Sql)
+target_link_libraries(SanctifyLive PRIVATE Qt6::Widgets Qt6::Network Qt6::Sql Qt6::Concurrent)
 
 # Lets BibleLibrary find resources/scripture/bibles.sqlite when running
 # straight out of the build tree during development, without requiring

@@ -53,9 +53,11 @@ public class SlideClient {
          * background image (see PROTOCOL.md); already decoded to a
          * Bitmap on the IO thread so the callback never blocks the
          * caller decoding it itself. When null, render the solid bg
-         * color as before.
+         * color as before. focusX/focusY (see PROTOCOL.md's fx/fy) say
+         * which part of that image should stay in frame if it has to be
+         * cropped to fit -- meaningless when image is null.
          */
-        void onSlide(String text, int bg, int fg, Bitmap image);
+        void onSlide(String text, int bg, int fg, Bitmap image, float focusX, float focusY);
         void onBlackout();
         /** Force the screen on and to the front, even over the lock screen. */
         void onWake();
@@ -68,6 +70,9 @@ public class SlideClient {
 
     private volatile String host;
     private volatile int    port;
+    private volatile String role;         // Prefs.ROLE_DISPLAY or Prefs.ROLE_PHONE
+    private volatile int    screenWidth;  // pixels, as currently laid out -- best-effort hint only
+    private volatile int    screenHeight;
     private Listener        listener;
 
     private Thread   ioThread;
@@ -75,10 +80,14 @@ public class SlideClient {
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
 
-    public SlideClient(String host, int port, Listener listener) {
-        this.host     = host;
-        this.port     = port;
-        this.listener = listener;
+    public SlideClient(String host, int port, String role, int screenWidth, int screenHeight,
+                        Listener listener) {
+        this.host         = host;
+        this.port         = port;
+        this.role         = role;
+        this.screenWidth  = screenWidth;
+        this.screenHeight = screenHeight;
+        this.listener     = listener;
     }
 
     /** Start (or restart) the background I/O loop. */
@@ -107,6 +116,18 @@ public class SlideClient {
         closeSocket();   // causes the read loop to throw, triggering reconnect
     }
 
+    /**
+     * Updates what this client identifies as in its next hello. Only
+     * takes effect on the next connection -- the hello is sent once per
+     * connect (see PROTOCOL.md) -- so pair this with reconnect() (or a
+     * fresh start()) if the change needs to reach the server right away.
+     */
+    public void updateDeviceInfo(String newRole, int newScreenWidth, int newScreenHeight) {
+        this.role         = newRole;
+        this.screenWidth  = newScreenWidth;
+        this.screenHeight = newScreenHeight;
+    }
+
     // ── I/O loop ──────────────────────────────────────────────────────────
 
     private void ioLoop() {
@@ -130,6 +151,7 @@ public class SlideClient {
         s.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT);
 
         synchronized (this) { socket = s; }
+        sendHello(s);
         fireConnected();
 
         BufferedReader reader = new BufferedReader(
@@ -145,6 +167,30 @@ public class SlideClient {
         fireDisconnected();
     }
 
+    /**
+     * Sent once, immediately after connecting, so the server knows
+     * whether to treat this device as the sanctuary display or an
+     * operator's phone -- see PROTOCOL.md's "Hello" section. Best-effort:
+     * a write failure here just means the server falls back to treating
+     * us as role Display with unknown resolution, same as an old client
+     * that predates this handshake entirely, so it's caught and logged
+     * rather than tearing down the connection over it.
+     */
+    private void sendHello(Socket s) {
+        try {
+            JSONObject hello = new JSONObject();
+            hello.put("type", "hello");
+            hello.put("role", role);
+            hello.put("w", screenWidth);
+            hello.put("h", screenHeight);
+            byte[] bytes = (hello.toString() + "\n").getBytes(StandardCharsets.UTF_8);
+            s.getOutputStream().write(bytes);
+            s.getOutputStream().flush();
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to send hello — " + e.getMessage());
+        }
+    }
+
     private void parseLine(String line) {
         if (line.isEmpty()) return;
         try {
@@ -157,13 +203,15 @@ public class SlideClient {
                     String fgStr = obj.optString("fg", "#ffffff");
                     int bg = parseColor(bgStr, 0xFF000000);
                     int fg = parseColor(fgStr, 0xFFFFFFFF);
+                    float focusX = (float) obj.optDouble("fx", 0.5);
+                    float focusY = (float) obj.optDouble("fy", 0.5);
                     // Decode here, on the IO thread, rather than posting
                     // the raw base64/bytes to the main thread and decoding
                     // there -- JPEG decode is the slow part of handling an
                     // image frame, and this keeps it off the UI thread so
                     // it can never show up as a frozen display.
                     Bitmap image = obj.has("image") ? decodeImage(obj.optString("image", "")) : null;
-                    fireSlide(text, bg, fg, image);
+                    fireSlide(text, bg, fg, image, focusX, focusY);
                     break;
                 }
                 case "blackout":
@@ -222,7 +270,7 @@ public class SlideClient {
     private void fireDisconnected() { mainHandler.post(() -> { if (listener != null) listener.onDisconnected(); }); }
     private void fireBlackout()   { mainHandler.post(() -> { if (listener != null) listener.onBlackout(); }); }
     private void fireWake()       { mainHandler.post(() -> { if (listener != null) listener.onWake(); }); }
-    private void fireSlide(String text, int bg, int fg, Bitmap image) {
-        mainHandler.post(() -> { if (listener != null) listener.onSlide(text, bg, fg, image); });
+    private void fireSlide(String text, int bg, int fg, Bitmap image, float focusX, float focusY) {
+        mainHandler.post(() -> { if (listener != null) listener.onSlide(text, bg, fg, image, focusX, focusY); });
     }
 }

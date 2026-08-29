@@ -29,6 +29,7 @@
 #include "MediaLibraryPanel.h"
 #include "OutputWindow.h"
 #include "ScheduleModel.h"
+#include "SettingsWindow.h"
 #include "SlideServer.h"
 
 namespace {
@@ -160,6 +161,15 @@ void OperatorWindow::buildMenuBar()
     // Keep the toolbar's checkable Black action and this menu action in
     // sync in both directions.
     m_actBlack = actBlackMenu;
+
+    liveMenu->addSeparator();
+    QAction *actSendLiveToPhone = liveMenu->addAction(tr("Send Live to Phone Only"));
+    actSendLiveToPhone->setToolTip(
+        tr("Pin whatever is live right now to connected phones, even after the main display moves on"));
+    connect(actSendLiveToPhone, &QAction::triggered, this, &OperatorWindow::onSendLiveToPhoneOnly);
+    QAction *actMirrorPhone = liveMenu->addAction(tr("Mirror Main Display on Phone"));
+    actMirrorPhone->setToolTip(tr("Stop overriding phone content -- go back to always matching the main display"));
+    connect(actMirrorPhone, &QAction::triggered, this, &OperatorWindow::onMirrorPhoneToMain);
 
     QMenu *profilesMenu = menuBar()->addMenu(tr("&Profiles"));
     profilesMenu->addAction(makeComingSoonAction(QIcon(), tr("Manage Profiles..."), this));
@@ -317,6 +327,7 @@ QWidget *OperatorWindow::buildWorkspace()
     // ---------- Bottom media library ----------
     m_mediaLibrary = new MediaLibraryPanel(this);
     connect(m_mediaLibrary, &MediaLibraryPanel::mediaActivated, this, &OperatorWindow::onMediaActivated);
+    connect(m_mediaLibrary, &MediaLibraryPanel::mediaSentToPhone, this, &OperatorWindow::onMediaSentToPhone);
     connect(m_mediaLibrary, &MediaLibraryPanel::scriptureActivated, this, &OperatorWindow::onScriptureActivated);
 
     // ---------- Overall vertical split ----------
@@ -367,14 +378,36 @@ void OperatorWindow::onScheduleRowChanged(int row)
     m_model->goLiveFromSchedule(row);
 }
 
-void OperatorWindow::onMediaActivated(const QString &label, const QColor &background, const QString &imagePath)
+void OperatorWindow::onMediaActivated(const QString &label, const QColor &background, const QString &imagePath,
+                                      const QPointF &focus)
 {
     // A real imported image supplies its own visual, so no text overlay;
     // the placeholder color swatches show their label as overlay text
     // since they have no actual picture to display.
     Slide slide(label, imagePath.isEmpty() ? label : QString(), background);
     slide.backgroundImagePath = imagePath;
+    slide.backgroundFocus = focus;
     m_model->sendMediaLive(slide);
+}
+
+void OperatorWindow::onMediaSentToPhone(const QString &label, const QColor &background, const QString &imagePath,
+                                        const QPointF &focus)
+{
+    Slide slide(label, imagePath.isEmpty() ? label : QString(), background);
+    slide.backgroundImagePath = imagePath;
+    slide.backgroundFocus = focus;
+    m_model->sendPhoneOverride(slide);
+}
+
+void OperatorWindow::onSendLiveToPhoneOnly()
+{
+    if (const Slide *live = m_model->liveSlide())
+        m_model->sendPhoneOverride(*live);
+}
+
+void OperatorWindow::onMirrorPhoneToMain()
+{
+    m_model->clearPhoneOverride();
 }
 
 void OperatorWindow::onScriptureActivated(const QString &reference, const QString &text,
@@ -390,24 +423,12 @@ void OperatorWindow::onScriptureActivated(const QString &reference, const QStrin
 
 void OperatorWindow::onEditOptions()
 {
-    QDialog dialog(this);
-    dialog.setWindowTitle(tr("Options"));
+    if (!m_settingsWindow)
+        m_settingsWindow = new SettingsWindow(m_model, m_slideServer, this);
 
-    auto *autoAddCheck = new QCheckBox(
-        tr("Automatically add media items to the schedule when sent live"), &dialog);
-    autoAddCheck->setChecked(m_model->autoAddMediaToSchedule());
-
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-
-    auto *layout = new QVBoxLayout(&dialog);
-    layout->addWidget(autoAddCheck);
-    layout->addWidget(buttons);
-
-    if (dialog.exec() == QDialog::Accepted) {
-        m_model->setAutoAddMediaToSchedule(autoAddCheck->isChecked());
-    }
+    m_settingsWindow->show();
+    m_settingsWindow->raise();
+    m_settingsWindow->activateWindow();
 }
 
 void OperatorWindow::onScheduleChanged()

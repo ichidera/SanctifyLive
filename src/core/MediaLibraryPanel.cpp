@@ -7,6 +7,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPainter>
 #include <QPainterPath>
@@ -16,6 +17,7 @@
 #include <QTreeWidget>
 
 #include "IconFactory.h"
+#include "ImageFramingDialog.h"
 #include "scripture/ScripturePanel.h"
 
 namespace {
@@ -41,16 +43,23 @@ QPixmap makeSwatch(const QColor &color, int size)
 
 // Cover-fit crop of a real imported image into a square thumbnail, with
 // the same rounded-corner treatment as the placeholder swatches so the
-// grid looks consistent regardless of where an entry came from.
-QPixmap makeImageThumbnail(const QString &path, int size)
+// grid looks consistent regardless of where an entry came from. Honors
+// the same focus point the live output crops toward (see
+// MediaEntry::focus / Slide::backgroundFocus) so the thumbnail always
+// shows what will actually end up on screen, not just whatever a
+// dead-center crop happened to keep.
+QPixmap makeImageThumbnail(const QString &path, int size, const QPointF &focus)
 {
     QPixmap source(path);
     if (source.isNull())
         return makeSwatch(QColor("#555555"), size);
 
     const QPixmap scaled = source.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-    const QRect cropRect((scaled.width() - size) / 2, (scaled.height() - size) / 2, size, size);
-    const QPixmap cropped = scaled.copy(cropRect);
+    const int maxX = qMax(0, scaled.width() - size);
+    const int maxY = qMax(0, scaled.height() - size);
+    const int x = qBound(0, qRound(focus.x() * scaled.width() - size / 2.0), maxX);
+    const int y = qBound(0, qRound(focus.y() * scaled.height() - size / 2.0), maxY);
+    const QPixmap cropped = scaled.copy(QRect(x, y, size, size));
 
     QPixmap rounded(size, size);
     rounded.fill(Qt::transparent);
@@ -191,9 +200,11 @@ MediaLibraryPanel::MediaLibraryPanel(QWidget *parent) : QWidget(parent)
     m_mediaGrid->setMovement(QListView::Static);
     m_mediaGrid->setSpacing(6);
     m_mediaGrid->setWordWrap(true);
+    m_mediaGrid->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_mediaGrid, &QListWidget::currentItemChanged, this, &MediaLibraryPanel::onGridSelectionChanged);
     connect(m_mediaGrid, &QListWidget::itemActivated, this, &MediaLibraryPanel::onGridItemActivated);
     connect(m_mediaGrid, &QListWidget::itemDoubleClicked, this, &MediaLibraryPanel::onGridItemActivated);
+    connect(m_mediaGrid, &QListWidget::customContextMenuRequested, this, &MediaLibraryPanel::onGridContextMenu);
 
     auto *gridPanel = new QWidget(mediaTab);
     auto *gridPanelLayout = new QVBoxLayout(gridPanel);
@@ -289,7 +300,7 @@ void MediaLibraryPanel::populateSampleMedia()
 QIcon MediaLibraryPanel::iconForEntry(const MediaEntry &entry) const
 {
     if (!entry.imagePath.isEmpty())
-        return QIcon(makeImageThumbnail(entry.imagePath, kGridIconSize));
+        return QIcon(makeImageThumbnail(entry.imagePath, kGridIconSize, entry.focus));
     return QIcon(makeSwatch(entry.color, kGridIconSize));
 }
 
@@ -308,10 +319,17 @@ void MediaLibraryPanel::rebuildGridForCategory(const QString &category)
     m_mediaGrid->clear();
 
     const auto items = m_sampleData.value(category);
-    for (const auto &entry : items) {
+    for (int i = 0; i < items.size(); ++i) {
+        const MediaEntry &entry = items.at(i);
         auto *listItem = new QListWidgetItem(iconForEntry(entry), entry.label);
         listItem->setData(Qt::UserRole, entry.color);
         listItem->setData(Qt::UserRole + 1, entry.imagePath);
+        listItem->setData(Qt::UserRole + 2, entry.focus);
+        // Index into m_sampleData[category] this item corresponds to --
+        // lets the context menu write an edited focus point straight
+        // back to the source-of-truth entry rather than needing to
+        // search for it by label (which need not be unique).
+        listItem->setData(Qt::UserRole + 3, i);
         listItem->setTextAlignment(Qt::AlignHCenter);
         m_mediaGrid->addItem(listItem);
     }
@@ -352,7 +370,51 @@ void MediaLibraryPanel::onGridItemActivated(QListWidgetItem *item)
         return;
     const QColor color = item->data(Qt::UserRole).value<QColor>();
     const QString imagePath = item->data(Qt::UserRole + 1).toString();
-    emit mediaActivated(item->text(), color, imagePath);
+    const QPointF focus = item->data(Qt::UserRole + 2).toPointF();
+    emit mediaActivated(item->text(), color, imagePath, focus);
+}
+
+void MediaLibraryPanel::onGridContextMenu(const QPoint &pos)
+{
+    QListWidgetItem *item = m_mediaGrid->itemAt(pos);
+    if (!item)
+        return;
+
+    const QString label = item->text();
+    const QColor color = item->data(Qt::UserRole).value<QColor>();
+    const QString imagePath = item->data(Qt::UserRole + 1).toString();
+    const QPointF focus = item->data(Qt::UserRole + 2).toPointF();
+    const int entryIndex = item->data(Qt::UserRole + 3).toInt();
+
+    QMenu menu(this);
+    QAction *goLiveAction = menu.addAction(tr("Go Live"));
+    QAction *sendToPhoneAction = menu.addAction(tr("Send to Phone Only"));
+    menu.addSeparator();
+    QAction *editFramingAction = menu.addAction(tr("Edit Framing..."));
+    // Framing only means something for a real photo -- the color
+    // swatches have nothing to crop.
+    editFramingAction->setEnabled(!imagePath.isEmpty());
+
+    QAction *chosen = menu.exec(m_mediaGrid->viewport()->mapToGlobal(pos));
+    if (chosen == goLiveAction) {
+        emit mediaActivated(label, color, imagePath, focus);
+    } else if (chosen == sendToPhoneAction) {
+        emit mediaSentToPhone(label, color, imagePath, focus);
+    } else if (chosen == editFramingAction) {
+        ImageFramingDialog dialog(imagePath, focus, this);
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+
+        const QPointF newFocus = dialog.focus();
+        auto &entries = m_sampleData[m_currentCategory];
+        if (entryIndex >= 0 && entryIndex < entries.size()) {
+            entries[entryIndex].focus = newFocus;
+            item->setData(Qt::UserRole + 2, newFocus);
+            item->setIcon(iconForEntry(entries.at(entryIndex)));
+            if (item == m_mediaGrid->currentItem())
+                onGridSelectionChanged(); // refresh the larger preview too
+        }
+    }
 }
 
 void MediaLibraryPanel::onImportClicked()

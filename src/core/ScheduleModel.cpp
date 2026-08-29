@@ -2,6 +2,14 @@
 
 ScheduleModel::ScheduleModel(QObject *parent) : QObject(parent)
 {
+    // Whenever the main live content changes, "phone" clients need to
+    // hear about it too, UNLESS an override is active -- in which case
+    // the phone deliberately isn't following the main output right now,
+    // and this change shouldn't disturb it.
+    connect(this, &ScheduleModel::liveContentChanged, this, [this]() {
+        if (!m_hasPhoneOverride)
+            emit phoneContentChanged();
+    });
 }
 
 // ---------------------------------------------------------------------
@@ -149,6 +157,32 @@ const Slide *ScheduleModel::previewSlide() const
     if (!m_hasLiveSlide)
         return nullptr;
     return &m_liveSlide;
+}
+
+// ---------------------------------------------------------------------
+// Phone-only content override
+// ---------------------------------------------------------------------
+
+void ScheduleModel::sendPhoneOverride(const Slide &slide)
+{
+    m_phoneOverrideSlide = slide;
+    m_hasPhoneOverride = true;
+    emit phoneContentChanged();
+}
+
+void ScheduleModel::clearPhoneOverride()
+{
+    if (!m_hasPhoneOverride)
+        return; // avoid a spurious push when there was nothing to clear
+    m_hasPhoneOverride = false;
+    emit phoneContentChanged();
+}
+
+const Slide *ScheduleModel::phoneSlide() const
+{
+    if (m_hasPhoneOverride)
+        return &m_phoneOverrideSlide;
+    return liveSlide();
 }
 
 // ---------------------------------------------------------------------

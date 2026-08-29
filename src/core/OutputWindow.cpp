@@ -50,12 +50,21 @@ void OutputWindow::paintEvent(QPaintEvent *event)
         const QPixmap pixmap(slide->backgroundImagePath);
         if (!pixmap.isNull()) {
             // Cover-fit: scale to fill the widget, cropping any overflow,
-            // same idea as CSS background-size: cover.
+            // same idea as CSS background-size: cover. The crop window is
+            // biased toward the slide's focus point (default dead-center,
+            // reproducing the old behavior exactly) rather than always
+            // centering, so an operator can keep a photo's actual subject
+            // in frame even when this window's aspect ratio doesn't match
+            // the source image's -- see Slide::backgroundFocus.
             const QPixmap scaled = pixmap.scaled(size(), Qt::KeepAspectRatioByExpanding,
                                                   Qt::SmoothTransformation);
-            const QRect sourceRect(
-                (scaled.width() - width()) / 2, (scaled.height() - height()) / 2,
-                width(), height());
+            const int maxX = qMax(0, scaled.width() - width());
+            const int maxY = qMax(0, scaled.height() - height());
+            const int x = qBound(0, qRound(slide->backgroundFocus.x() * scaled.width()
+                                            - width() / 2.0), maxX);
+            const int y = qBound(0, qRound(slide->backgroundFocus.y() * scaled.height()
+                                            - height() / 2.0), maxY);
+            const QRect sourceRect(x, y, width(), height());
             painter.drawPixmap(rect(), scaled, sourceRect);
         } else {
             // File went missing/unreadable since it was imported -- fail

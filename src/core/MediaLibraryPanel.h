@@ -3,6 +3,7 @@
 
 
 #include <QColor>
+#include <QPointF>
 #include <QWidget>
 
 class QTabWidget;
@@ -24,10 +25,10 @@ class ScripturePanel;
 //
 // "Media" and "Scriptures" are functional; Songs/Presentations/Themes
 // are still visible-but-disabled placeholders. A handful of sample
-// color-swatch entries ship
-// built in purely to prove the layout; anything the user imports via
-// the "+" button is real (a real image file, or a placeholder for
-// non-image types until those get proper thumbnailing/playback).
+// color-swatch entries ship built in purely to prove the layout;
+// anything the user imports via the "+" button is real (a real image
+// file, or a placeholder for non-image types until those get proper
+// thumbnailing/playback).
 //
 // All internal splits use QSplitter, so the tree/grid/preview widths
 // are user-resizable, matching the rest of the app's panels.
@@ -39,11 +40,22 @@ public:
     explicit MediaLibraryPanel(QWidget *parent = nullptr);
 
 signals:
-    // Emitted when the user activates (double-clicks) a media item to
-    // send it live. imagePath is empty for the placeholder color
-    // swatches; when non-empty, the real image should be used as the
-    // background with no text overlay.
-    void mediaActivated(const QString &label, const QColor &background, const QString &imagePath);
+    // Emitted when the user activates (double-clicks, or "Go Live" from
+    // the right-click menu) a media item to send it live everywhere.
+    // imagePath is empty for the placeholder color swatches; when
+    // non-empty, the real image should be used as the background with no
+    // text overlay, cropped toward focus when a device's aspect ratio
+    // doesn't match the image's (see Slide::backgroundFocus, and "Edit
+    // Framing..." below).
+    void mediaActivated(const QString &label, const QColor &background, const QString &imagePath,
+                         const QPointF &focus);
+
+    // Emitted from the right-click "Send to Phone Only" action: same
+    // payload as mediaActivated, but meant for ScheduleModel's phone
+    // override rather than the main live output -- see PROTOCOL.md's
+    // "Roles" section for what that actually does.
+    void mediaSentToPhone(const QString &label, const QColor &background, const QString &imagePath,
+                          const QPointF &focus);
 
     // Forwarded from the Scriptures tab's ScripturePanel; see
     // ScripturePanel::scriptureActivated for what each argument means.
@@ -53,6 +65,7 @@ private slots:
     void onCategorySelected(QTreeWidgetItem *item, int column);
     void onGridSelectionChanged();
     void onGridItemActivated(QListWidgetItem *item);
+    void onGridContextMenu(const QPoint &pos);
     void onImportClicked();
 
 private:
@@ -61,6 +74,11 @@ private:
         QString label;
         QColor color;
         QString imagePath; // empty for placeholder swatches
+        // Normalized (0..1) point in imagePath that should stay in frame
+        // when a cover-fit crop has to discard part of the image --
+        // meaningless (and unused) for placeholder swatches. Set via the
+        // right-click "Edit Framing..." action.
+        QPointF focus = QPointF(0.5, 0.5);
     };
 
     void populateSampleMedia();

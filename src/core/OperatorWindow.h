@@ -3,6 +3,7 @@
 
 
 #include <QMainWindow>
+#include <QPointF>
 
 class QListWidget;
 class QListWidgetItem;
@@ -13,6 +14,7 @@ class OutputWindow;
 class MediaLibraryPanel;
 class HistoryBar;
 class SlideServer;
+class SettingsWindow;
 
 // OperatorWindow: menu bar + toolbar up top, a History strip, then a
 // resizable vertical split between the three-column live workspace
@@ -37,6 +39,13 @@ class SlideServer;
 // device is connected) that forces a sleeping/locked tablet's screen
 // back on -- for when it's timed out or been put to sleep and the
 // operator would otherwise have to walk over and tap it.
+//
+// Connected devices are one of two roles -- "display" (sanctuary/stage
+// screens, always mirroring live) or "phone" (an operator's handheld,
+// which can be pinned to different content via "Send to Phone Only" in
+// the Media Library, or cleared back to mirroring via the Live menu).
+// Edit > Options opens SettingsWindow, a persistent (non-modal) window
+// with a Displays tab listing exactly what's connected and as what.
 class OperatorWindow : public QMainWindow
 {
     Q_OBJECT
@@ -54,7 +63,10 @@ private slots:
     void onAddSlideClicked();
     void onRemoveSlideClicked();
     void onScheduleRowChanged(int row);
-    void onMediaActivated(const QString &label, const QColor &background, const QString &imagePath);
+    void onMediaActivated(const QString &label, const QColor &background, const QString &imagePath,
+                          const QPointF &focus);
+    void onMediaSentToPhone(const QString &label, const QColor &background, const QString &imagePath,
+                            const QPointF &focus);
     void onScriptureActivated(const QString &reference, const QString &text, const QString &translationCode);
     void onLiveContentChanged();
     void onScheduleChanged();
@@ -68,6 +80,8 @@ private slots:
     void onAbout();
     void onDisplayClientCountChanged(int count);
     void onWakeDisplayClicked();
+    void onSendLiveToPhoneOnly();
+    void onMirrorPhoneToMain();
 
 private:
     void buildMenuBar();
@@ -88,6 +102,7 @@ private:
     MediaLibraryPanel *m_mediaLibrary;
     HistoryBar *m_historyBar;
     SlideServer *m_slideServer;
+    SettingsWindow *m_settingsWindow = nullptr; // lazily created on first Edit > Options
 
     // Panel containers, kept as members so the View menu can toggle them.
     QWidget *m_schedulePanel;

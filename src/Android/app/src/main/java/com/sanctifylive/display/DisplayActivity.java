@@ -19,6 +19,8 @@ import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 
 import com.sanctifylive.display.databinding.ActivityDisplayBinding;
 
@@ -150,8 +152,8 @@ public class DisplayActivity extends Activity implements SlideClient.Listener {
     }
 
     @Override
-    public void onSlide(String text, int bg, int fg, Bitmap image) {
-        binding.slideView.setSlide(text, bg, fg, image);
+    public void onSlide(String text, int bg, int fg, Bitmap image, float focusX, float focusY) {
+        binding.slideView.setSlide(text, bg, fg, image, focusX, focusY);
     }
 
     @Override
@@ -240,9 +242,17 @@ public class DisplayActivity extends Activity implements SlideClient.Listener {
         View dialogView = getLayoutInflater().inflate(R.layout.dialog_settings, null);
         EditText etHost = dialogView.findViewById(R.id.etHost);
         EditText etPort = dialogView.findViewById(R.id.etPort);
+        RadioGroup rgRole = dialogView.findViewById(R.id.rgRole);
+        RadioButton rbRoleDisplay = dialogView.findViewById(R.id.rbRoleDisplay);
+        RadioButton rbRolePhone = dialogView.findViewById(R.id.rbRolePhone);
 
         etHost.setText(Prefs.getHost(this));
         etPort.setText(String.valueOf(Prefs.getPort(this)));
+        if (Prefs.ROLE_PHONE.equals(Prefs.getRole(this))) {
+            rbRolePhone.setChecked(true);
+        } else {
+            rbRoleDisplay.setChecked(true);
+        }
 
         new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog)
                 .setTitle(R.string.app_name)
@@ -254,9 +264,11 @@ public class DisplayActivity extends Activity implements SlideClient.Listener {
                     int port;
                     try { port = Integer.parseInt(portStr); }
                     catch (NumberFormatException e) { port = 55432; }
+                    String role = (rgRole.getCheckedRadioButtonId() == R.id.rbRolePhone)
+                            ? Prefs.ROLE_PHONE : Prefs.ROLE_DISPLAY;
 
-                    Prefs.save(this, host, port);
-                    reconnectClient(host, port);
+                    Prefs.save(this, host, port, role);
+                    reconnectClient(host, port, role);
                     dismissKeyboard(dialogView);
                 })
                 .setNegativeButton("Cancel", (d, which) -> dismissKeyboard(dialogView))
@@ -273,16 +285,32 @@ public class DisplayActivity extends Activity implements SlideClient.Listener {
     private void startClient() {
         String host = Prefs.getHost(this);
         int    port = Prefs.getPort(this);
-        client = new SlideClient(host, port, this);
+        String role = Prefs.getRole(this);
+        client = new SlideClient(host, port, role, currentScreenWidth(), currentScreenHeight(), this);
         client.start();
     }
 
-    private void reconnectClient(String host, int port) {
+    private void reconnectClient(String host, int port, String role) {
         if (client != null) {
+            client.updateDeviceInfo(role, currentScreenWidth(), currentScreenHeight());
             client.reconnect(host, port);
         }
         binding.tvStatus.setVisibility(View.VISIBLE);
         binding.tvStatus.setText(R.string.status_reconnecting);
+    }
+
+    /**
+     * Best-effort screen size for the hello handshake (see
+     * PROTOCOL.md) -- just a hint the server doesn't currently depend
+     * on for correctness, so plain DisplayMetrics is plenty; no need
+     * for the newer per-window WindowMetrics APIs here.
+     */
+    private int currentScreenWidth() {
+        return getResources().getDisplayMetrics().widthPixels;
+    }
+
+    private int currentScreenHeight() {
+        return getResources().getDisplayMetrics().heightPixels;
     }
 
     // ── Misc ──────────────────────────────────────────────────────────────

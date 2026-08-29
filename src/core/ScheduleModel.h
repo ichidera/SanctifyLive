@@ -71,10 +71,30 @@ public:
     bool autoAddMediaToSchedule() const { return m_autoAddMediaToSchedule; }
     void setAutoAddMediaToSchedule(bool enabled) { m_autoAddMediaToSchedule = enabled; }
 
+    // --- Phone-only content override ---
+    // By default, every connected device (sanctuary display or an
+    // operator's phone) mirrors liveSlide() exactly. Setting an override
+    // here makes "phone"-role clients show this instead, until it's
+    // cleared -- e.g. so a stage-monitor phone can keep showing the next
+    // verse while the sanctuary screen has already cut away to something
+    // else. Display-role clients are never affected by this.
+    void sendPhoneOverride(const Slide &slide);
+    void clearPhoneOverride();
+    bool hasPhoneOverride() const { return m_hasPhoneOverride; }
+    // What a "phone" role client should actually be shown right now:
+    // the override if one is set, otherwise the same as liveSlide().
+    // Returns nullptr under the same conditions as liveSlide() (no live
+    // content, or blacked out) when there's no override in effect.
+    const Slide *phoneSlide() const;
+
 signals:
     void scheduleChanged();
     void liveContentChanged();
     void historyChanged();
+    // Fired whenever what a "phone" client should show changes -- either
+    // because the override was set/cleared, or (when there's no override)
+    // because the mirrored live content itself changed.
+    void phoneContentChanged();
 
 private:
     void pushHistory(const Slide &slide);
@@ -89,6 +109,9 @@ private:
 
     QVector<Slide> m_history;      // most-recent-first
     bool m_autoAddMediaToSchedule = false;
+
+    Slide m_phoneOverrideSlide;
+    bool m_hasPhoneOverride = false;
 
     static constexpr int kMaxHistory = 16;
 };
