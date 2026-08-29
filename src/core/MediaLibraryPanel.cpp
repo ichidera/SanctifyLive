@@ -16,6 +16,7 @@
 #include <QTreeWidget>
 
 #include "IconFactory.h"
+#include "scripture/ScripturePanel.h"
 
 namespace {
 constexpr int kGridIconSize = 64;
@@ -118,7 +119,10 @@ MediaLibraryPanel::MediaLibraryPanel(QWidget *parent) : QWidget(parent)
     m_contentTabs = new QTabWidget(this);
 
     m_contentTabs->addTab(new QWidget(this), tr("Songs"));
-    m_contentTabs->addTab(new QWidget(this), tr("Scriptures"));
+
+    m_scripturePanel = new ScripturePanel(this);
+    connect(m_scripturePanel, &ScripturePanel::scriptureActivated, this, &MediaLibraryPanel::scriptureActivated);
+    const int scripturesTabIndex = m_contentTabs->addTab(m_scripturePanel, tr("Scriptures"));
 
     // --- Media tab (the only functional one for now) ---
     auto *mediaTab = new QWidget(this);
@@ -238,9 +242,9 @@ MediaLibraryPanel::MediaLibraryPanel(QWidget *parent) : QWidget(parent)
 
     const int mediaTabIndex = m_contentTabs->indexOf(mediaTab);
     m_contentTabs->setTabEnabled(0, false); // Songs
-    m_contentTabs->setTabEnabled(1, false); // Scriptures
     m_contentTabs->setTabEnabled(mediaTabIndex + 1, false); // Presentations
     m_contentTabs->setTabEnabled(mediaTabIndex + 2, false); // Themes
+    Q_UNUSED(scripturesTabIndex); // enabled by default; kept for clarity at the call site above
     m_contentTabs->setCurrentIndex(mediaTabIndex);
 
     for (int i = 0; i < m_contentTabs->count(); ++i) {

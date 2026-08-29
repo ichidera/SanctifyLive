@@ -13,14 +13,18 @@ class QListWidgetItem;
 class QLabel;
 class QLineEdit;
 class QToolButton;
+class ScripturePanel;
 
 // The bottom resource library: a row of content-type tabs (Songs,
-// Scriptures, Media, Presentations, Themes), and -- for the Media tab,
-// the only one built out so far -- a category tree on the left, a
-// thumbnail grid in the middle, and a larger preview on the right.
+// Scriptures, Media, Presentations, Themes). "Media" has a category
+// tree on the left, a thumbnail grid in the middle, and a larger
+// preview on the right; "Scriptures" hosts a ScripturePanel (see
+// src/core/scripture/ScripturePanel.h) with its own book/chapter/verse
+// browser and search box.
 //
-// Only "Media" is functional right now; the others are visible-but-
-// disabled placeholders. A handful of sample color-swatch entries ship
+// "Media" and "Scriptures" are functional; Songs/Presentations/Themes
+// are still visible-but-disabled placeholders. A handful of sample
+// color-swatch entries ship
 // built in purely to prove the layout; anything the user imports via
 // the "+" button is real (a real image file, or a placeholder for
 // non-image types until those get proper thumbnailing/playback).
@@ -41,6 +45,10 @@ signals:
     // background with no text overlay.
     void mediaActivated(const QString &label, const QColor &background, const QString &imagePath);
 
+    // Forwarded from the Scriptures tab's ScripturePanel; see
+    // ScripturePanel::scriptureActivated for what each argument means.
+    void scriptureActivated(const QString &reference, const QString &text, const QString &translationCode);
+
 private slots:
     void onCategorySelected(QTreeWidgetItem *item, int column);
     void onGridSelectionChanged();
@@ -60,6 +68,7 @@ private:
     QIcon iconForEntry(const MediaEntry &entry) const;
 
     QTabWidget *m_contentTabs;
+    ScripturePanel *m_scripturePanel;
     QTreeWidget *m_categoryTree;
     QListWidget *m_mediaGrid;
     QLabel *m_previewImage;

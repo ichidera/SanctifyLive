@@ -55,6 +55,7 @@ private slots:
     void onRemoveSlideClicked();
     void onScheduleRowChanged(int row);
     void onMediaActivated(const QString &label, const QColor &background, const QString &imagePath);
+    void onScriptureActivated(const QString &reference, const QString &text, const QString &translationCode);
     void onLiveContentChanged();
     void onScheduleChanged();
 

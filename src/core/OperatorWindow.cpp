@@ -317,6 +317,7 @@ QWidget *OperatorWindow::buildWorkspace()
     // ---------- Bottom media library ----------
     m_mediaLibrary = new MediaLibraryPanel(this);
     connect(m_mediaLibrary, &MediaLibraryPanel::mediaActivated, this, &OperatorWindow::onMediaActivated);
+    connect(m_mediaLibrary, &MediaLibraryPanel::scriptureActivated, this, &OperatorWindow::onScriptureActivated);
 
     // ---------- Overall vertical split ----------
     auto *mainSplitter = new QSplitter(Qt::Vertical, this);
@@ -374,6 +375,17 @@ void OperatorWindow::onMediaActivated(const QString &label, const QColor &backgr
     Slide slide(label, imagePath.isEmpty() ? label : QString(), background);
     slide.backgroundImagePath = imagePath;
     m_model->sendMediaLive(slide);
+}
+
+void OperatorWindow::onScriptureActivated(const QString &reference, const QString &text,
+                                           const QString &translationCode)
+{
+    // The reference (e.g. "John 3:16") becomes the slide's operator-only
+    // label; the verse text itself -- annotated with the translation
+    // code, the way most projection software footnotes Scripture -- is
+    // what's actually projected.
+    const QString projected = QStringLiteral("%1\n\n%2 (%3)").arg(text, reference, translationCode);
+    m_model->sendMediaLive(Slide(reference, projected, Qt::black));
 }
 
 void OperatorWindow::onEditOptions()
