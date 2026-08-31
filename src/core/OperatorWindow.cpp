@@ -75,7 +75,15 @@ OperatorWindow::OperatorWindow(QWidget *parent)
     setWindowTitle(tr("SanctifyLive"));
     resize(1500, 820);
 
-    m_outputWindow = new OutputWindow(m_model, OutputWindow::Source::Live, nullptr);
+    m_outputWindow = new OutputWindow(m_model, OutputWindow::Source::Live);
+    // Owning it via setParent(this, Qt::Window) rather than leaving it
+    // fully parentless is what makes this match EasyWorship's behavior:
+    // ONE entry in the taskbar/Alt+Tab, even though the congregation
+    // output is, under the hood, a second, independently-positioned
+    // window (it still needs to be a real top-level window -- Qt::Window
+    // -- so it can be dragged to a second monitor and shown fullscreen
+    // there; only the *owner* changes here, not its window-ness).
+    m_outputWindow->setParent(this, Qt::Window);
     m_liveEditorView = new OutputWindow(m_model, OutputWindow::Source::Preview, this);
     m_liveOutputView = new OutputWindow(m_model, OutputWindow::Source::Live, this);
 
@@ -122,11 +130,10 @@ OperatorWindow::OperatorWindow(QWidget *parent)
 OperatorWindow::~OperatorWindow()
 {
     m_slideServer->stop();
-
-    // m_outputWindow has no parent (it's a real top-level window so it can
-    // be moved to a second monitor independent of the operator window),
-    // so it won't be destroyed automatically by Qt's parent/child cleanup.
-    delete m_outputWindow;
+    // m_outputWindow is now parented to `this` (see the constructor's
+    // setParent(this, Qt::Window) call), so Qt's normal parent/child
+    // cleanup destroys it automatically -- no manual delete needed here
+    // anymore, and doing one would double-free it.
 }
 
 // ---------------------------------------------------------------------
