@@ -62,9 +62,25 @@ add_executable(SanctifyLive
     src/core/remote/SlideServer.h
     src/core/remote/SlideServer.cpp
 
-    # settings: the persistent Edit > Options window.
+    # settings: the persistent Edit > Options window. One OutputProfile
+    # struct + one OutputSettingsPage tab strip is shared by every output
+    # destination (Main Output, Alternate Output, Foldback, Android);
+    # pages/ holds each individually-selectable sidebar page.
+    src/core/settings/OutputProfile.h
     src/core/settings/SettingsWindow.h
     src/core/settings/SettingsWindow.cpp
+    src/core/settings/pages/OutputContentTabs.h
+    src/core/settings/pages/OutputContentTabs.cpp
+    src/core/settings/pages/OutputSettingsPage.h
+    src/core/settings/pages/OutputSettingsPage.cpp
+    src/core/settings/pages/OutputPreviewThumbnail.h
+    src/core/settings/pages/OutputPreviewThumbnail.cpp
+    src/core/settings/pages/AndroidOutputPage.h
+    src/core/settings/pages/AndroidOutputPage.cpp
+    src/core/settings/pages/ServiceIntervalsPage.h
+    src/core/settings/pages/ServiceIntervalsPage.cpp
+    src/core/settings/pages/AdvancedPage.h
+    src/core/settings/pages/AdvancedPage.cpp
 
     # The composition root: wires every module above into one app shell.
     src/core/OperatorWindow.h

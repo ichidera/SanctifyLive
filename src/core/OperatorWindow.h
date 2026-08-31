@@ -4,6 +4,7 @@
 
 #include <QMainWindow>
 #include <QPointF>
+#include <QRect>
 
 class QListWidget;
 class QListWidgetItem;
@@ -77,6 +78,7 @@ private slots:
     void onClearAction();
     void onLiveOutputToggled(bool checked);
     void onEditOptions();
+    void onMainOutputConfigured(int monitorIndex, const QRect &position);
     void onAbout();
     void onDisplayClientCountChanged(int count);
     void onWakeDisplayClicked();
@@ -103,6 +105,14 @@ private:
     HistoryBar *m_historyBar;
     SlideServer *m_slideServer;
     SettingsWindow *m_settingsWindow = nullptr; // lazily created on first Edit > Options
+
+    // Where the real congregation-facing OutputWindow should appear, as
+    // configured on Options > Main Output > General. Unconfigured until
+    // the operator opens Options and clicks OK at least once this
+    // session -- see showOutputWindow()'s fallback for that case.
+    bool m_mainOutputConfigured = false;
+    int m_mainOutputMonitorIndex = -1;
+    QRect m_mainOutputPosition;
 
     // Panel containers, kept as members so the View menu can toggle them.
     QWidget *m_schedulePanel;

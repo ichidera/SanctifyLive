@@ -171,6 +171,70 @@ inline QIcon liveMonitor(int s = 28)
     });
 }
 
+// A plain output-monitor glyph, parameterized by accent color so the
+// Options sidebar can give Main Output/Alternate Output/Foldback a
+// visually distinct (but clearly related) icon without three near-copies
+// of this function. Deliberately calmer than liveMonitor() above, which
+// is reserved for the toolbar's "Live" action.
+inline QIcon monitorOutput(const QColor &accent, int s = 20)
+{
+    return draw(s, [accent](QPainter &p, int n) {
+        p.setPen(QPen(QColor("#9a9a9e"), 1.4));
+        p.setBrush(QColor("#2b2b2e"));
+        p.drawRoundedRect(QRectF(n * 0.08, n * 0.14, n * 0.84, n * 0.56), 2, 2);
+        p.setPen(Qt::NoPen);
+        p.setBrush(accent);
+        p.drawRoundedRect(QRectF(n * 0.18, n * 0.24, n * 0.64, n * 0.36), 1, 1);
+        p.setPen(QPen(QColor("#9a9a9e"), 1.4));
+        p.drawLine(QPointF(n * 0.5, n * 0.7), QPointF(n * 0.5, n * 0.82));
+        p.drawLine(QPointF(n * 0.32, n * 0.86), QPointF(n * 0.68, n * 0.86));
+    });
+}
+
+inline QIcon androidRobot(int s = 20)
+{
+    return draw(s, [](QPainter &p, int n) {
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor("#a4c639"));
+        p.drawRoundedRect(QRectF(n * 0.2, n * 0.36, n * 0.6, n * 0.44), n * 0.08, n * 0.08);
+        p.drawRect(QRectF(n * 0.08, n * 0.4, n * 0.1, n * 0.3));
+        p.drawRect(QRectF(n * 0.82, n * 0.4, n * 0.1, n * 0.3));
+        p.drawRect(QRectF(n * 0.3, n * 0.78, n * 0.12, n * 0.16));
+        p.drawRect(QRectF(n * 0.58, n * 0.78, n * 0.12, n * 0.16));
+        p.drawArc(QRectF(n * 0.22, n * 0.06, n * 0.56, n * 0.56), 0, 180 * 16);
+        p.setPen(QPen(Qt::white, n * 0.05));
+        p.drawLine(QPointF(n * 0.38, n * 0.5), QPointF(n * 0.38, n * 0.6));
+        p.drawLine(QPointF(n * 0.62, n * 0.5), QPointF(n * 0.62, n * 0.6));
+    });
+}
+
+inline QIcon clock(int s = 20)
+{
+    return draw(s, [](QPainter &p, int n) {
+        p.setPen(QPen(QColor("#5dade2"), 1.6));
+        p.setBrush(Qt::NoBrush);
+        p.drawEllipse(QRectF(n * 0.1, n * 0.1, n * 0.8, n * 0.8));
+        p.drawLine(QPointF(n * 0.5, n * 0.5), QPointF(n * 0.5, n * 0.26));
+        p.drawLine(QPointF(n * 0.5, n * 0.5), QPointF(n * 0.68, n * 0.58));
+    });
+}
+
+inline QIcon gear(int s = 20)
+{
+    return draw(s, [](QPainter &p, int n) {
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor("#9a9a9e"));
+        const double cx = n * 0.5, cy = n * 0.5, rOuter = n * 0.42, rInner = n * 0.3, toothR = n * 0.08;
+        for (int i = 0; i < 8; ++i) {
+            const double angle = i * M_PI / 4;
+            p.drawEllipse(QPointF(cx + rOuter * std::cos(angle), cy + rOuter * std::sin(angle)), toothR, toothR);
+        }
+        p.drawEllipse(QPointF(cx, cy), rInner, rInner);
+        p.setBrush(QColor("#1c1c1f"));
+        p.drawEllipse(QPointF(cx, cy), rInner * 0.45, rInner * 0.45);
+    });
+}
+
 inline QIcon search(int s = 16)
 {
     return draw(s, [](QPainter &p, int n) {

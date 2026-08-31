@@ -430,12 +430,28 @@ void OperatorWindow::onScriptureActivated(const QString &reference, const QStrin
 
 void OperatorWindow::onEditOptions()
 {
-    if (!m_settingsWindow)
+    if (!m_settingsWindow) {
         m_settingsWindow = new SettingsWindow(m_model, m_slideServer, this);
+        connect(m_settingsWindow, &SettingsWindow::mainOutputChanged,
+                this, &OperatorWindow::onMainOutputConfigured);
+    }
 
     m_settingsWindow->show();
     m_settingsWindow->raise();
     m_settingsWindow->activateWindow();
+}
+
+void OperatorWindow::onMainOutputConfigured(int monitorIndex, const QRect &position)
+{
+    m_mainOutputConfigured = true;
+    m_mainOutputMonitorIndex = monitorIndex;
+    m_mainOutputPosition = position;
+
+    // If the congregation-facing window is already up, re-apply its
+    // geometry immediately rather than waiting for the next Go Live --
+    // the operator just told us where it belongs.
+    if (m_outputWindow->isVisible())
+        showOutputWindow();
 }
 
 void OperatorWindow::onScheduleChanged()
@@ -575,6 +591,24 @@ QString OperatorWindow::localNetworkStatusText(int clientCount) const
 void OperatorWindow::showOutputWindow()
 {
     const QList<QScreen *> screens = QGuiApplication::screens();
+
+    // Once the operator has actually opened Options and clicked OK on a
+    // Main Output monitor choice, that choice wins -- even if it's
+    // "None" (monitorIndex < 0), which falls back to a plain windowed
+    // view rather than us guessing a monitor they didn't ask for.
+    if (m_mainOutputConfigured) {
+        if (m_mainOutputMonitorIndex >= 0 && m_mainOutputMonitorIndex < screens.size()) {
+            m_outputWindow->setGeometry(screens.at(m_mainOutputMonitorIndex)->geometry());
+            m_outputWindow->showFullScreen();
+        } else {
+            m_outputWindow->resize(960, 540);
+            m_outputWindow->show();
+        }
+        return;
+    }
+
+    // Options has never been opened this session -- keep the original
+    // best-effort default of preferring a second monitor when one exists.
     if (screens.size() > 1) {
         QScreen *outputScreen = screens.at(1);
         m_outputWindow->setGeometry(outputScreen->geometry());
