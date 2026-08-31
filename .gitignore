@@ -10,3 +10,4 @@ docs/
 .gradle/
 .idea/
 local.properties
+resources/
