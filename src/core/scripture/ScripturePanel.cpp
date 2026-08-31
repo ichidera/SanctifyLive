@@ -14,7 +14,7 @@
 #include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
 
-#include "../IconFactory.h"
+#include "../common/IconFactory.h"
 
 namespace {
 constexpr int kVerseRole = Qt::UserRole;

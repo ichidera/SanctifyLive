@@ -33,7 +33,7 @@ class SettingsWindow;
 //
 // This window also owns the SlideServer, which mirrors live content to
 // any connected Android stage-display devices over the local network
-// (see src/android/PROTOCOL.md and src/core/SlideServer.h). A status
+// (see src/Android/PROTOCOL.md and src/core/remote/SlideServer.h). A status
 // bar label shows the listening address and how many devices are
 // connected, alongside a "Wake Display" button (enabled only while a
 // device is connected) that forces a sleeping/locked tablet's screen

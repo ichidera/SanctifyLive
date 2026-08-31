@@ -4,7 +4,7 @@
 #include <QVector>
 #include <QWidget>
 
-#include "SlideServer.h"
+#include "../remote/SlideServer.h"
 
 class QCheckBox;
 class QLabel;

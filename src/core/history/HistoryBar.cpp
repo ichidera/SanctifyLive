@@ -6,7 +6,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 
-#include "ScheduleModel.h"
+#include "../schedule/ScheduleModel.h"
 
 namespace {
 constexpr int kSwatchSize = 32;

@@ -8,7 +8,7 @@
 #include <QTabWidget>
 #include <QVBoxLayout>
 
-#include "ScheduleModel.h"
+#include "../schedule/ScheduleModel.h"
 
 namespace {
 QString roleLabel(SlideServer::Role role)

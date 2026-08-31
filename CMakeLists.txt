@@ -15,28 +15,58 @@ set(CMAKE_AUTOUIC ON)
 # thread (QtConcurrent::run) instead of blocking the GUI thread.
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network Sql Concurrent)
 
+# src/core is organized as one module folder per feature area (schedule,
+# output, media, scripture, history, remote, settings), each exposing a
+# small, mostly self-contained API -- e.g. scripture/ owns everything
+# Bible-related, remote/ owns everything about the Android link. Only
+# OperatorWindow.{h,cpp} sits directly in src/core/: it's the composition
+# root that wires the modules together, not a module itself. When adding
+# a new module, give it its own folder here rather than dropping loose
+# files into src/core/ directly.
+
 add_executable(SanctifyLive
     src/main.cpp
-    src/core/Slide.h
-    src/core/ScheduleModel.h
-    src/core/ScheduleModel.cpp
-    src/core/OutputWindow.h
-    src/core/OutputWindow.cpp
-    src/core/IconFactory.h
-    src/core/MediaLibraryPanel.h
-    src/core/MediaLibraryPanel.cpp
-    src/core/ImageFramingDialog.h
-    src/core/ImageFramingDialog.cpp
+
+    # Shared utilities used by more than one module.
+    src/core/common/IconFactory.h
+
+    # schedule: the plain-data content model (Slide) and the operator's
+    # planned running order (ScheduleModel) -- no UI of its own.
+    src/core/schedule/Slide.h
+    src/core/schedule/ScheduleModel.h
+    src/core/schedule/ScheduleModel.cpp
+
+    # output: the actual on-screen rendering widget, reused for the real
+    # congregation-facing window and both in-app preview panes.
+    src/core/output/OutputWindow.h
+    src/core/output/OutputWindow.cpp
+
+    # media: the resource library grid (images/video/audio placeholders)
+    # plus its background-image crop/framing editor.
+    src/core/media/MediaLibraryPanel.h
+    src/core/media/MediaLibraryPanel.cpp
+    src/core/media/ImageFramingDialog.h
+    src/core/media/ImageFramingDialog.cpp
+
+    # scripture: Bible verse lookup/search, backed by a bundled SQLite DB.
     src/core/scripture/BibleLibrary.h
     src/core/scripture/BibleLibrary.cpp
     src/core/scripture/ScripturePanel.h
     src/core/scripture/ScripturePanel.cpp
-    src/core/HistoryBar.h
-    src/core/HistoryBar.cpp
-    src/core/SlideServer.h
-    src/core/SlideServer.cpp
-    src/core/SettingsWindow.h
-    src/core/SettingsWindow.cpp
+
+    # history: the "recently shown" strip above the live workspace.
+    src/core/history/HistoryBar.h
+    src/core/history/HistoryBar.cpp
+
+    # remote: the Android stage-display link (see src/Android/PROTOCOL.md).
+    src/core/remote/SlideServer.h
+    src/core/remote/SlideServer.cpp
+
+    # settings: the persistent Edit > Options window.
+    src/core/settings/SettingsWindow.h
+    src/core/settings/SettingsWindow.cpp
+
+    # The composition root: wires every module above into one app shell.
     src/core/OperatorWindow.h
     src/core/OperatorWindow.cpp
 )

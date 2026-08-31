@@ -24,13 +24,13 @@
 #include <QToolBar>
 #include <QToolButton>
 
-#include "HistoryBar.h"
-#include "IconFactory.h"
-#include "MediaLibraryPanel.h"
-#include "OutputWindow.h"
-#include "ScheduleModel.h"
-#include "SettingsWindow.h"
-#include "SlideServer.h"
+#include "history/HistoryBar.h"
+#include "common/IconFactory.h"
+#include "media/MediaLibraryPanel.h"
+#include "output/OutputWindow.h"
+#include "schedule/ScheduleModel.h"
+#include "settings/SettingsWindow.h"
+#include "remote/SlideServer.h"
 
 namespace {
 QLabel *makePanelHeader(const QString &text, QWidget *parent)
@@ -55,7 +55,7 @@ QAction *makeComingSoonAction(const QIcon &icon, const QString &text, QObject *p
 
 // Best-effort guess at the machine's LAN-facing IPv4 address, purely so
 // the status bar can tell the operator what to type into the Android
-// app -- see src/android/PROTOCOL.md. Not authoritative: a machine with
+// app -- see src/Android/PROTOCOL.md. Not authoritative: a machine with
 // multiple adapters (VPN, virtual switches, etc.) may have several
 // candidates; this just picks the first plausible one rather than
 // trying to be clever about routing.

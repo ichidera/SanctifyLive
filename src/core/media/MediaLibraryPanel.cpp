@@ -16,9 +16,9 @@
 #include <QToolButton>
 #include <QTreeWidget>
 
-#include "IconFactory.h"
+#include "../common/IconFactory.h"
 #include "ImageFramingDialog.h"
-#include "scripture/ScripturePanel.h"
+#include "../scripture/ScripturePanel.h"
 
 namespace {
 constexpr int kGridIconSize = 64;

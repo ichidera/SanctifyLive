@@ -10,8 +10,8 @@
 #include <QTimer>
 #include <QtConcurrent/QtConcurrentRun>
 
-#include "ScheduleModel.h"
-#include "Slide.h"
+#include "../schedule/ScheduleModel.h"
+#include "../schedule/Slide.h"
 
 namespace {
 // Sent periodically so a client (and the OS's TCP stack / any NAT in

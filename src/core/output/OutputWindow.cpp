@@ -3,7 +3,7 @@
 #include <QPainter>
 #include <QPaintEvent>
 
-#include "ScheduleModel.h"
+#include "../schedule/ScheduleModel.h"
 
 OutputWindow::OutputWindow(ScheduleModel *model, Source source, QWidget *parent)
     : QWidget(parent), m_model(model), m_source(source)
