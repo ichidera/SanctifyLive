@@ -51,6 +51,10 @@ add_executable(SanctifyLive
     # scripture: Bible verse lookup/search, backed by a bundled SQLite DB.
     src/core/scripture/BibleLibrary.h
     src/core/scripture/BibleLibrary.cpp
+    src/core/scripture/ScriptureSearchEdit.h
+    src/core/scripture/ScriptureSearchEdit.cpp
+    src/core/scripture/TranslationLibraryDialog.h
+    src/core/scripture/TranslationLibraryDialog.cpp
     src/core/scripture/ScripturePanel.h
     src/core/scripture/ScripturePanel.cpp
 

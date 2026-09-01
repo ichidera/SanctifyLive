@@ -332,6 +332,39 @@ inline QIcon treePremium(int s = 16)
         p.drawPolygon(star);
     });
 }
+
+inline QIcon hamburgerMenu(int s = 16)
+{
+    return draw(s, [](QPainter &p, int n) {
+        p.setPen(QPen(QColor("#aaaaaa"), 1.6));
+        p.drawLine(QPointF(n * 0.16, n * 0.28), QPointF(n * 0.84, n * 0.28));
+        p.drawLine(QPointF(n * 0.16, n * 0.5), QPointF(n * 0.84, n * 0.5));
+        p.drawLine(QPointF(n * 0.16, n * 0.72), QPointF(n * 0.84, n * 0.72));
+    });
+}
+
+inline QIcon diskImport(int s = 28)
+{
+    return draw(s, [](QPainter &p, int n) {
+        p.setPen(QPen(QColor("#dcdcdc"), 1.5));
+        p.setBrush(QColor("#5dade2"));
+        p.drawEllipse(QRectF(n * 0.12, n * 0.12, n * 0.76, n * 0.76));
+        p.setPen(QPen(QColor("#1c1c1f"), 2));
+        p.drawLine(QPointF(n * 0.5, n * 0.3), QPointF(n * 0.5, n * 0.58));
+        p.drawLine(QPointF(n * 0.36, n * 0.46), QPointF(n * 0.5, n * 0.6));
+        p.drawLine(QPointF(n * 0.64, n * 0.46), QPointF(n * 0.5, n * 0.6));
+        p.drawLine(QPointF(n * 0.32, n * 0.7), QPointF(n * 0.68, n * 0.7));
+    });
+}
+
+inline QIcon plusAdd(int s = 20)
+{
+    return draw(s, [](QPainter &p, int n) {
+        p.setPen(QPen(QColor("#dcdcdc"), 2));
+        p.drawLine(QPointF(n * 0.5, n * 0.18), QPointF(n * 0.5, n * 0.82));
+        p.drawLine(QPointF(n * 0.18, n * 0.5), QPointF(n * 0.82, n * 0.5));
+    });
+}
 }
 
 #endif // SANCTIFYLIVE_CORE_ICONFACTORY_H_

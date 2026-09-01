@@ -57,6 +57,23 @@ public:
     int chapterCount(const QString &translationCode, const QString &bookName) const;
     int verseCount(const QString &translationCode, const QString &bookName, int chapter) const;
 
+    // Bounds checks used by the search box to reject a chapter/verse
+    // number the moment it becomes impossible, rather than after the
+    // fact. chapter/verse <= 0 is always invalid (there is no "chapter
+    // 0"); chapterCount()/verseCount() return 0 for an unknown book, so
+    // these also safely reject a not-yet-resolved book.
+    bool isValidChapter(const QString &translationCode, const QString &bookName, int chapter) const;
+    bool isValidVerse(const QString &translationCode, const QString &bookName, int chapter, int verseNum) const;
+
+    // Returns every book name (in canonical order) whose name -- or a
+    // recognized abbreviation for it -- starts with `prefix`. This is
+    // what powers the search box's autocomplete: prefix "g" matches
+    // both "Genesis" and "Galatians"; "ge" narrows to just "Genesis".
+    // Empty prefix or no match returns an empty list; the caller decides
+    // what an empty result means (e.g. "not a book -- try a keyword
+    // search instead").
+    QStringList matchBookNames(const QString &translationCode, const QString &prefix) const;
+
     struct Verse
     {
         QString book;
@@ -97,13 +114,40 @@ public:
     // relevant without the user needing to know FTS query syntax.
     QVector<SearchResult> search(const QString &translationCode, const QString &query, int limit = 200) const;
 
+    // Path to the currently-open sqlite file (empty if none is open).
+    // Exposed so callers that need to *write* to it (importing a new
+    // translation) know what file to open a second, writable connection
+    // against -- see importTranslationFromJsonFile().
+    QString databasePath() const { return m_dbPath; }
+
+    // Imports one translation from a scrollmapper bible_databases-format
+    // JSON file (https://github.com/scrollmapper/bible_databases/tree/
+    // master/formats/json) into the currently-open database, replacing
+    // any existing translation with the same code (same behavior as
+    // scripts/build_bible_db.py, just from a live app instead of the
+    // offline tool). Used by both "Add Bible from disk..." (a local
+    // file the person already has) and the "More available" download
+    // flow (a file fetched from the repository first, then imported the
+    // same way). On success, re-opens the database so the new
+    // translation is immediately visible via translations()/etc.
+    //
+    // If the current database file isn't writable (e.g. installed under
+    // a read-only Program Files-style directory), transparently copies
+    // it to a per-user writable location first and switches to that
+    // copy for this and future imports -- the caller doesn't need to
+    // know or care which path ends up being used.
+    bool importTranslationFromJsonFile(const QString &jsonPath, QString *outCode = nullptr,
+                                        QString *outError = nullptr);
+
 private:
     QString findDefaultDatabasePath() const;
     QString normalizeBookNameLookup(const QString &translationCode, const QString &rawBookName) const;
+    bool ensureWritableDatabasePath(QString *outError);
 
     QSqlDatabase m_db;
     QString m_connectionName;
     QString m_lastError;
+    QString m_dbPath;
 };
 
 #endif // SANCTIFYLIVE_CORE_SCRIPTURE_BIBLELIBRARY_H_

@@ -1,12 +1,20 @@
 #include "BibleLibrary.h"
 
+#include <algorithm>
+
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMap>
 #include <QRegularExpression>
+#include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QStandardPaths>
 #include <QUuid>
 
 namespace {
@@ -124,6 +132,53 @@ QString canonicalizeOrdinalPrefix(const QString &input)
     return trimmed;
 }
 
+// Mirrors scripts/build_bible_db.py's SCHEMA exactly, so a database
+// imported into at runtime ends up byte-for-byte compatible with one
+// built offline by that script. CREATE ... IF NOT EXISTS makes this
+// safe to run against a database that already has the schema (the
+// normal case) as well as a fresh, empty file (a from-scratch "Add
+// Bible from disk" with no bundled database at all).
+const char *const kBibleSchemaDdl = R"SQL(
+CREATE TABLE IF NOT EXISTS translations (
+    code TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    testament_order TEXT NOT NULL DEFAULT 'protestant'
+);
+CREATE TABLE IF NOT EXISTS books (
+    translation_code TEXT NOT NULL REFERENCES translations(code) ON DELETE CASCADE,
+    book_index INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    PRIMARY KEY (translation_code, book_index)
+);
+CREATE TABLE IF NOT EXISTS verses (
+    translation_code TEXT NOT NULL REFERENCES translations(code) ON DELETE CASCADE,
+    book_index INTEGER NOT NULL,
+    book_name TEXT NOT NULL,
+    chapter INTEGER NOT NULL,
+    verse INTEGER NOT NULL,
+    text TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_verses_lookup
+    ON verses(translation_code, book_index, chapter, verse);
+CREATE INDEX IF NOT EXISTS idx_verses_book_name
+    ON verses(translation_code, book_name, chapter, verse);
+CREATE VIRTUAL TABLE IF NOT EXISTS verses_fts USING fts5(
+    text,
+    content='verses',
+    content_rowid='rowid'
+);
+CREATE TRIGGER IF NOT EXISTS verses_ai AFTER INSERT ON verses BEGIN
+    INSERT INTO verses_fts(rowid, text) VALUES (new.rowid, new.text);
+END;
+CREATE TRIGGER IF NOT EXISTS verses_ad AFTER DELETE ON verses BEGIN
+    INSERT INTO verses_fts(verses_fts, rowid, text) VALUES('delete', old.rowid, old.text);
+END;
+CREATE TRIGGER IF NOT EXISTS verses_au AFTER UPDATE ON verses BEGIN
+    INSERT INTO verses_fts(verses_fts, rowid, text) VALUES('delete', old.rowid, old.text);
+    INSERT INTO verses_fts(rowid, text) VALUES (new.rowid, new.text);
+END;
+)SQL";
+
 } // namespace
 
 BibleLibrary::BibleLibrary()
@@ -194,6 +249,7 @@ bool BibleLibrary::openFile(const QString &sqlitePath)
         return false;
     }
     m_lastError.clear();
+    m_dbPath = QDir::cleanPath(sqlitePath);
     return true;
 }
 
@@ -275,6 +331,68 @@ int BibleLibrary::verseCount(const QString &translationCode, const QString &book
     if (!query.exec() || !query.next())
         return 0;
     return query.value(0).toInt();
+}
+
+bool BibleLibrary::isValidChapter(const QString &translationCode, const QString &bookName, int chapter) const
+{
+    if (chapter <= 0)
+        return false;
+    return chapter <= chapterCount(translationCode, bookName);
+}
+
+bool BibleLibrary::isValidVerse(const QString &translationCode, const QString &bookName, int chapter,
+                                 int verseNum) const
+{
+    if (verseNum <= 0)
+        return false;
+    return verseNum <= verseCount(translationCode, bookName, chapter);
+}
+
+QStringList BibleLibrary::matchBookNames(const QString &translationCode, const QString &prefix) const
+{
+    QStringList result;
+    const QString needle = canonicalizeOrdinalPrefix(prefix);
+    if (needle.isEmpty())
+        return result;
+
+    const QStringList names = bookNames(translationCode);
+
+    // 1. Direct prefix match against the book's own (canonically-cased)
+    //    name, e.g. "g" -> Genesis, Galatians; "ge" -> Genesis only.
+    //    This also naturally handles numbered books: "1" matches every
+    //    "1 ..." book once both sides go through canonicalizeOrdinalPrefix.
+    for (const QString &name : names) {
+        if (canonicalizeOrdinalPrefix(name).startsWith(needle))
+            result << name;
+    }
+    if (!result.isEmpty())
+        return result;
+
+    // 2. Fall back to the abbreviation table for shorthand that isn't a
+    //    literal prefix of the full name (e.g. "jn" -> John, "rev" ->
+    //    Revelation). Kept in canonical book order and de-duplicated,
+    //    since several abbreviations can point at the same book.
+    QSet<QString> seen;
+    for (auto it = abbreviationTable().constBegin(); it != abbreviationTable().constEnd(); ++it) {
+        if (!it.key().startsWith(needle))
+            continue;
+        const QString targetKey = canonicalizeOrdinalPrefix(it.value());
+        for (const QString &name : names) {
+            if (canonicalizeOrdinalPrefix(name) == targetKey && !seen.contains(name)) {
+                seen.insert(name);
+                result << name;
+            }
+        }
+    }
+    // Keep canonical (book_index) order rather than abbreviation-table
+    // iteration order.
+    if (result.size() > 1) {
+        const QStringList canonicalOrder = names;
+        std::sort(result.begin(), result.end(), [&canonicalOrder](const QString &a, const QString &b) {
+            return canonicalOrder.indexOf(a) < canonicalOrder.indexOf(b);
+        });
+    }
+    return result;
 }
 
 QVector<BibleLibrary::Verse> BibleLibrary::versesInChapter(const QString &translationCode, const QString &bookName,
@@ -452,4 +570,214 @@ QVector<BibleLibrary::SearchResult> BibleLibrary::search(const QString &translat
         result.append(r);
     }
     return result;
+}
+
+bool BibleLibrary::ensureWritableDatabasePath(QString *outError)
+{
+    if (m_dbPath.isEmpty()) {
+        // Nothing open yet (e.g. openDefault() found no bundled database
+        // at all) -- start a brand-new one in a per-user writable
+        // location so "Add Bible from disk" still works on a totally
+        // fresh install.
+        const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        QDir().mkpath(dir);
+        m_dbPath = QDir(dir).filePath(QStringLiteral("bibles.sqlite"));
+        return true;
+    }
+
+    QFileInfo info(m_dbPath);
+    if (info.exists() && info.isWritable())
+        return true;
+    // Directory needs to be writable too, for sqlite's journal/WAL files.
+    if (info.exists() && QFileInfo(info.absolutePath()).isWritable())
+        return true;
+
+    // Bundled database lives somewhere read-only (a packaged install
+    // under Program Files or /usr/share, typically). Copy it once to a
+    // per-user location and use that copy from now on -- the original
+    // bundled translations stay put, only the user's added ones live in
+    // the copy.
+    const QString userDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(userDir);
+    const QString userCopy = QDir(userDir).filePath(QStringLiteral("bibles.sqlite"));
+
+    if (!QFileInfo::exists(userCopy)) {
+        if (info.exists() && !QFile::copy(m_dbPath, userCopy)) {
+            if (outError)
+                *outError = QObject::tr("Could not create a writable copy of the Scripture database at %1.")
+                                .arg(userCopy);
+            return false;
+        }
+    }
+    m_dbPath = userCopy;
+    return true;
+}
+
+bool BibleLibrary::importTranslationFromJsonFile(const QString &jsonPath, QString *outCode, QString *outError)
+{
+    QFile file(jsonPath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (outError)
+            *outError = QObject::tr("Could not open %1.").arg(jsonPath);
+        return false;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
+    file.close();
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        if (outError)
+            *outError = QObject::tr("%1 is not a valid Bible JSON file (%2).")
+                            .arg(jsonPath, parseError.errorString());
+        return false;
+    }
+
+    const QJsonObject root = doc.object();
+    const QString fullName = root.value(QStringLiteral("translation")).toString();
+    const QJsonArray books = root.value(QStringLiteral("books")).toArray();
+    if (fullName.isEmpty() || books.isEmpty()) {
+        if (outError)
+            *outError = QObject::tr(
+                "%1 doesn't look like a scrollmapper-format Bible JSON file "
+                "(missing \"translation\" or \"books\").").arg(jsonPath);
+        return false;
+    }
+
+    const QString code = fullName.section(QLatin1Char(':'), 0, 0).trimmed();
+    const QString name = fullName.contains(QLatin1Char(':'))
+        ? fullName.section(QLatin1Char(':'), 1).trimmed()
+        : fullName;
+    if (code.isEmpty()) {
+        if (outError)
+            *outError = QObject::tr("Could not determine a translation code from \"%1\".").arg(fullName);
+        return false;
+    }
+
+    if (!ensureWritableDatabasePath(outError))
+        return false;
+
+    const QString connName = QStringLiteral("bible_import_%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    bool ok = true;
+    {
+        QSqlDatabase importDb = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connName);
+        importDb.setDatabaseName(m_dbPath);
+        if (!importDb.open()) {
+            if (outError)
+                *outError = importDb.lastError().text();
+            QSqlDatabase::removeDatabase(connName);
+            return false;
+        }
+
+        QSqlQuery schemaQuery(importDb);
+        for (const QString &statement : QString::fromUtf8(kBibleSchemaDdl)
+                 .split(QLatin1Char(';'), Qt::SkipEmptyParts)) {
+            const QString trimmedStatement = statement.trimmed();
+            if (!trimmedStatement.isEmpty() && !schemaQuery.exec(trimmedStatement)) {
+                if (outError)
+                    *outError = schemaQuery.lastError().text();
+                ok = false;
+                break;
+            }
+        }
+
+        if (ok) {
+            importDb.transaction();
+
+            QSqlQuery del(importDb);
+            for (const QString &table : {QStringLiteral("verses"), QStringLiteral("books"), QStringLiteral("translations")}) {
+                del.prepare(QStringLiteral("DELETE FROM %1 WHERE %2 = ?")
+                                .arg(table, table == QStringLiteral("translations") ? QStringLiteral("code")
+                                                                                     : QStringLiteral("translation_code")));
+                del.addBindValue(code);
+                if (!del.exec()) {
+                    if (outError)
+                        *outError = del.lastError().text();
+                    ok = false;
+                    break;
+                }
+            }
+
+            if (ok) {
+                QSqlQuery insTranslation(importDb);
+                insTranslation.prepare(QStringLiteral("INSERT INTO translations(code, name) VALUES (?, ?)"));
+                insTranslation.addBindValue(code);
+                insTranslation.addBindValue(name);
+                if (!insTranslation.exec()) {
+                    if (outError)
+                        *outError = insTranslation.lastError().text();
+                    ok = false;
+                }
+            }
+
+            if (ok) {
+                QSqlQuery insBook(importDb);
+                insBook.prepare(
+                    QStringLiteral("INSERT INTO books(translation_code, book_index, name) VALUES (?, ?, ?)"));
+                QSqlQuery insVerse(importDb);
+                insVerse.prepare(QStringLiteral(
+                    "INSERT INTO verses(translation_code, book_index, book_name, chapter, verse, text) "
+                    "VALUES (?, ?, ?, ?, ?, ?)"));
+
+                int bookIndex = 0;
+                for (const QJsonValue &bookVal : books) {
+                    const QJsonObject bookObj = bookVal.toObject();
+                    const QString bookName = bookObj.value(QStringLiteral("name")).toString();
+
+                    insBook.addBindValue(code);
+                    insBook.addBindValue(bookIndex);
+                    insBook.addBindValue(bookName);
+                    if (!insBook.exec()) {
+                        if (outError)
+                            *outError = insBook.lastError().text();
+                        ok = false;
+                        break;
+                    }
+
+                    const QJsonArray chapters = bookObj.value(QStringLiteral("chapters")).toArray();
+                    for (const QJsonValue &chapterVal : chapters) {
+                        const QJsonObject chapterObj = chapterVal.toObject();
+                        const int chapterNum = chapterObj.value(QStringLiteral("chapter")).toInt();
+                        const QJsonArray verses = chapterObj.value(QStringLiteral("verses")).toArray();
+                        for (const QJsonValue &verseVal : verses) {
+                            const QJsonObject verseObj = verseVal.toObject();
+                            insVerse.addBindValue(code);
+                            insVerse.addBindValue(bookIndex);
+                            insVerse.addBindValue(bookName);
+                            insVerse.addBindValue(chapterObj.value(QStringLiteral("chapter")).toInt());
+                            insVerse.addBindValue(verseObj.value(QStringLiteral("verse")).toInt());
+                            insVerse.addBindValue(verseObj.value(QStringLiteral("text")).toString());
+                            if (!insVerse.exec()) {
+                                if (outError)
+                                    *outError = insVerse.lastError().text();
+                                ok = false;
+                                break;
+                            }
+                        }
+                        Q_UNUSED(chapterNum);
+                        if (!ok)
+                            break;
+                    }
+                    ++bookIndex;
+                    if (!ok)
+                        break;
+                }
+            }
+
+            if (ok)
+                importDb.commit();
+            else
+                importDb.rollback();
+        }
+    }
+    QSqlDatabase::removeDatabase(connName);
+
+    if (!ok)
+        return false;
+
+    if (outCode)
+        *outCode = code;
+
+    // Re-open our read-only connection against the (possibly new) path
+    // so the freshly-imported translation shows up immediately.
+    return openFile(m_dbPath);
 }

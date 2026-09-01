@@ -2,19 +2,25 @@
 
 #include <algorithm>
 
-#include <QComboBox>
+#include <QFileDialog>
 #include <QFont>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSplitter>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
 
 #include "../common/IconFactory.h"
+#include "ScriptureSearchEdit.h"
+#include "TranslationLibraryDialog.h"
 
 namespace {
 constexpr int kVerseRole = Qt::UserRole;
@@ -41,27 +47,55 @@ QString elideSnippet(const QString &text, int maxLength = 130)
         return text;
     return text.left(maxLength).trimmed() + QStringLiteral("...");
 }
+
+QString formatReferenceDisplay(const BibleLibrary::ParsedReference &ref)
+{
+    if (ref.verseStart <= 0)
+        return QStringLiteral("%1 %2").arg(ref.book).arg(ref.chapter);
+    if (ref.verseEnd > ref.verseStart)
+        return QStringLiteral("%1 %2:%3-%4").arg(ref.book).arg(ref.chapter).arg(ref.verseStart).arg(ref.verseEnd);
+    return QStringLiteral("%1 %2:%3").arg(ref.book).arg(ref.chapter).arg(ref.verseStart);
+}
 }
 
 ScripturePanel::ScripturePanel(QWidget *parent) : QWidget(parent)
 {
     m_libraryAvailable = m_library.openDefault();
 
-    // ---------- Top row: reference/keyword search + translation ----------
-    m_searchBox = new QLineEdit(this);
-    m_searchBox->setPlaceholderText(tr("Search or type a reference, e.g. John 3:16"));
-    m_searchBox->addAction(IconFactory::search(14), QLineEdit::LeadingPosition);
+    // ---------- Top row: reference/keyword search + translation + add ----------
+    m_searchBox = new ScriptureSearchEdit(this);
     connect(m_searchBox, &QLineEdit::returnPressed, this, &ScripturePanel::onSearchSubmitted);
-    connect(m_searchBox, &QLineEdit::textEdited, this, &ScripturePanel::onSearchTextEdited);
+    connect(m_searchBox, &ScriptureSearchEdit::liveWordQuery, this, &ScripturePanel::onLiveWordQuery);
+    connect(m_searchBox, &ScriptureSearchEdit::wordWrapToggleRequested, this,
+            &ScripturePanel::onWordWrapToggleRequested);
+    connect(m_searchBox, &ScriptureSearchEdit::sortOrderChangeRequested, this,
+            &ScripturePanel::onSortOrderChangeRequested);
+    connect(m_searchBox, &ScriptureSearchEdit::refreshRequested, this, [this]() {
+        if (m_searchResultsActive)
+            showSearchResults(m_library.search(currentTranslationCode(), m_lastSearchQuery), m_lastSearchQuery);
+        else if (!m_currentBook.isEmpty())
+            populateVerseList(m_currentBook, m_currentChapter);
+    });
 
-    m_translationCombo = new QComboBox(this);
-    m_translationCombo->setMinimumWidth(90);
-    connect(m_translationCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &ScripturePanel::onTranslationChanged);
+    m_translationMenu = new QMenu(this);
+    m_translationButton = new QToolButton(this);
+    m_translationButton->setPopupMode(QToolButton::InstantPopup);
+    m_translationButton->setMenu(m_translationMenu);
+    m_translationButton->setMinimumWidth(80);
+    m_translationButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+
+    m_plusMenu = new QMenu(this);
+    m_plusButton = new QToolButton(this);
+    m_plusButton->setIcon(IconFactory::plusAdd(16));
+    m_plusButton->setPopupMode(QToolButton::InstantPopup);
+    m_plusButton->setMenu(m_plusMenu);
+    m_plusButton->setToolTip(tr("Add a Bible, or organize your translations into folders/collections."));
+    rebuildPlusMenu();
 
     auto *searchRowLayout = new QHBoxLayout();
     searchRowLayout->addWidget(m_searchBox, 1);
-    searchRowLayout->addWidget(m_translationCombo);
+    searchRowLayout->addWidget(m_translationButton);
+    searchRowLayout->addWidget(m_plusButton);
 
     // ---------- Column 1: books, grouped Old/New Testament ----------
     m_bookTree = new QTreeWidget(this);
@@ -127,7 +161,8 @@ ScripturePanel::ScripturePanel(QWidget *parent) : QWidget(parent)
 
     if (!m_libraryAvailable) {
         m_searchBox->setEnabled(false);
-        m_translationCombo->setEnabled(false);
+        m_translationButton->setEnabled(false);
+        m_plusButton->setEnabled(false);
         m_bookTree->setEnabled(false);
         m_chapterGrid->setEnabled(false);
         m_verseList->setEnabled(false);
@@ -143,39 +178,131 @@ ScripturePanel::~ScripturePanel() = default;
 
 QString ScripturePanel::currentTranslationCode() const
 {
-    return m_translationCombo->currentData().toString();
+    return m_currentTranslationCode;
 }
 
 void ScripturePanel::populateTranslations()
 {
     const auto translations = m_library.translations();
-    m_translationCombo->blockSignals(true);
-    for (const auto &translation : translations)
-        m_translationCombo->addItem(translation.code, translation.code);
-    m_translationCombo->blockSignals(false);
-
     if (translations.isEmpty()) {
         m_footerLabel->setText(tr("No translations found in the Scripture database."));
+        rebuildTranslationMenu();
         return;
     }
 
-    m_translationCombo->setCurrentIndex(0);
-    m_translationCombo->setToolTip(translations.first().name);
+    m_currentTranslationCode = translations.first().code;
+    m_searchBox->setLibrary(&m_library, m_currentTranslationCode);
+    rebuildTranslationMenu();
     populateBookTree();
 }
 
-void ScripturePanel::onTranslationChanged(int index)
+void ScripturePanel::selectTranslation(const QString &code)
 {
-    if (index < 0)
+    if (code.isEmpty() || code == m_currentTranslationCode)
         return;
-    m_translationCombo->setToolTip(m_translationCombo->currentText());
-    for (const auto &translation : m_library.translations()) {
-        if (translation.code == currentTranslationCode()) {
-            m_translationCombo->setToolTip(translation.name);
+    m_currentTranslationCode = code;
+    m_searchBox->setTranslationCode(code);
+    rebuildTranslationMenu();
+    populateBookTree();
+}
+
+void ScripturePanel::rebuildTranslationMenu()
+{
+    m_translationMenu->clear();
+    const auto translations = m_library.translations();
+    for (const auto &translation : translations) {
+        QAction *action = m_translationMenu->addAction(translation.code);
+        action->setCheckable(true);
+        action->setChecked(translation.code == m_currentTranslationCode);
+        action->setToolTip(translation.name);
+        const QString code = translation.code;
+        connect(action, &QAction::triggered, this, [this, code]() { selectTranslation(code); });
+    }
+
+    if (!m_customFolders.isEmpty()) {
+        m_translationMenu->addSeparator();
+        QAction *header = m_translationMenu->addAction(tr("MY COLLECTIONS"));
+        header->setEnabled(false);
+        for (const QString &folder : m_customFolders) {
+            QAction *folderAction = m_translationMenu->addAction(QStringLiteral("    %1").arg(folder));
+            folderAction->setEnabled(false); // organizational placeholder; assigning translations isn't wired up yet
+        }
+    }
+
+    m_translationMenu->addSeparator();
+    QAction *more = m_translationMenu->addAction(tr("More Available..."));
+    connect(more, &QAction::triggered, this, &ScripturePanel::openTranslationLibraryDialog);
+
+    m_translationButton->setText(m_currentTranslationCode);
+    for (const auto &translation : translations) {
+        if (translation.code == m_currentTranslationCode) {
+            m_translationButton->setToolTip(translation.name);
             break;
         }
     }
-    populateBookTree();
+}
+
+void ScripturePanel::rebuildPlusMenu()
+{
+    m_plusMenu->clear();
+
+    auto addFolderAction = [this](const QString &label) {
+        QAction *action = m_plusMenu->addAction(label);
+        connect(action, &QAction::triggered, this, [this, label]() {
+            bool ok = false;
+            const QString name =
+                QInputDialog::getText(this, label, tr("Name:"), QLineEdit::Normal, QString(), &ok);
+            if (ok && !name.trimmed().isEmpty()) {
+                m_customFolders << name.trimmed();
+                rebuildTranslationMenu();
+            }
+        });
+    };
+    addFolderAction(tr("New Folder"));
+    addFolderAction(tr("New Collection"));
+    addFolderAction(tr("New My Folder"));
+    addFolderAction(tr("New My Collection"));
+
+    m_plusMenu->addSeparator();
+    QAction *addFromDisk = m_plusMenu->addAction(IconFactory::diskImport(16), tr("Add Bible from Disk..."));
+    connect(addFromDisk, &QAction::triggered, this, &ScripturePanel::promptAddBibleFromDisk);
+}
+
+void ScripturePanel::openTranslationLibraryDialog()
+{
+    QStringList installedCodes;
+    for (const auto &translation : m_library.translations())
+        installedCodes << translation.code;
+
+    auto *dialog = new TranslationLibraryDialog(&m_library, installedCodes, this);
+    QString lastAdded;
+    connect(dialog, &TranslationLibraryDialog::translationAdded, this,
+            [&lastAdded](const QString &code) { lastAdded = code; });
+    dialog->exec();
+    dialog->deleteLater();
+
+    if (!lastAdded.isEmpty()) {
+        rebuildTranslationMenu();
+        selectTranslation(lastAdded);
+    }
+}
+
+void ScripturePanel::promptAddBibleFromDisk()
+{
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Add Bible from Disk"), QString(), tr("Bible JSON files (*.json);;All files (*)"));
+    if (path.isEmpty())
+        return;
+
+    QString code, error;
+    if (!m_library.importTranslationFromJsonFile(path, &code, &error)) {
+        QMessageBox::warning(this, tr("Couldn't Add Bible"), error);
+        return;
+    }
+
+    rebuildTranslationMenu();
+    selectTranslation(code);
+    m_footerLabel->setText(tr("%1 added from disk.").arg(code));
 }
 
 void ScripturePanel::populateBookTree()
@@ -265,6 +392,8 @@ void ScripturePanel::populateVerseList(const QString &bookName, int chapter)
         item->setData(kVerseNumRole, v.verse);
         m_verseList->addItem(item);
     }
+    if (m_verseSortOrder == Qt::DescendingOrder)
+        sortVerseList();
     updateFooter();
 }
 
@@ -366,17 +495,29 @@ void ScripturePanel::sendVerses(const QString &book, int chapter, int verseStart
     emit scriptureActivated(reference, lines.join(QStringLiteral("\n")), code);
 }
 
-void ScripturePanel::onSearchTextEdited(const QString &text)
+void ScripturePanel::onLiveWordQuery(const QString &text)
 {
-    // Clearing the box manually backs out of search-results mode and
-    // returns to whatever book/chapter was being browsed before.
-    if (text.trimmed().isEmpty() && m_searchResultsActive) {
-        if (!m_currentBook.isEmpty())
-            populateVerseList(m_currentBook, m_currentChapter);
-        else
-            m_verseList->clear();
-        updateFooter();
+    // Fired by ScriptureSearchEdit whenever it's in word/sentence-search
+    // mode (i.e. what's typed doesn't match the start of any book name).
+    // Empty text means "back out of search-results mode" -- either the
+    // box was cleared, or it just switched into reference mode instead
+    // (which will drive the view itself via onSearchSubmitted/Enter).
+    if (text.trimmed().isEmpty()) {
+        if (m_searchResultsActive) {
+            if (!m_currentBook.isEmpty())
+                populateVerseList(m_currentBook, m_currentChapter);
+            else
+                m_verseList->clear();
+            updateFooter();
+        }
+        return;
     }
+
+    if (!m_libraryAvailable)
+        return;
+
+    m_lastSearchQuery = text;
+    showSearchResults(m_library.search(currentTranslationCode(), text), text);
 }
 
 void ScripturePanel::onSearchSubmitted()
@@ -390,11 +531,41 @@ void ScripturePanel::onSearchSubmitted()
         jumpToReference(ref);
         if (ref.verseStart > 0)
             sendVerses(ref.book, ref.chapter, ref.verseStart, ref.verseEnd);
+        m_searchBox->commitReference(formatReferenceDisplay(ref));
         return;
     }
 
-    const auto results = m_library.search(currentTranslationCode(), text);
-    showSearchResults(results, text);
+    // Not a resolvable reference -- live word search already covers this
+    // as the person types; Enter just re-runs it against the current text.
+    m_lastSearchQuery = text;
+    showSearchResults(m_library.search(currentTranslationCode(), text), text);
+}
+
+void ScripturePanel::onWordWrapToggleRequested(bool wordWrap)
+{
+    m_verseList->setWordWrap(wordWrap);
+}
+
+void ScripturePanel::onSortOrderChangeRequested(Qt::SortOrder order)
+{
+    m_verseSortOrder = order;
+    sortVerseList();
+}
+
+void ScripturePanel::sortVerseList()
+{
+    QList<QListWidgetItem *> items;
+    while (m_verseList->count() > 0)
+        items << m_verseList->takeItem(0);
+
+    std::stable_sort(items.begin(), items.end(), [this](QListWidgetItem *a, QListWidgetItem *b) {
+        const int keyA = a->data(kChapterRole).toInt() * 1000 + a->data(kVerseNumRole).toInt();
+        const int keyB = b->data(kChapterRole).toInt() * 1000 + b->data(kVerseNumRole).toInt();
+        return m_verseSortOrder == Qt::AscendingOrder ? keyA < keyB : keyA > keyB;
+    });
+
+    for (auto *item : items)
+        m_verseList->addItem(item);
 }
 
 void ScripturePanel::jumpToReference(const BibleLibrary::ParsedReference &ref)
@@ -444,6 +615,8 @@ void ScripturePanel::showSearchResults(const QVector<BibleLibrary::SearchResult>
         item->setData(kVerseNumRole, r.verse);
         m_verseList->addItem(item);
     }
+    if (m_verseSortOrder == Qt::DescendingOrder)
+        sortVerseList();
 
     if (results.isEmpty())
         m_footerLabel->setText(tr("No results for \u201c%1\u201d.").arg(query));
