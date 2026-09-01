@@ -2,6 +2,9 @@
 
 #include <QPainter>
 
+#include "../../output/SlideRenderer.h"
+#include "../../schedule/Slide.h"
+
 OutputPreviewThumbnail::OutputPreviewThumbnail(QWidget *parent) : QWidget(parent)
 {
     setMinimumHeight(96);
@@ -12,22 +15,21 @@ QSize OutputPreviewThumbnail::sizeHint() const
     return {188, 106};
 }
 
-void OutputPreviewThumbnail::setSampleLines(const QStringList &lines)
+void OutputPreviewThumbnail::setProfile(const OutputProfile *profile)
 {
-    m_sampleLines = lines;
+    m_hasProfile = (profile != nullptr);
+    if (profile)
+        m_profile = *profile;
+    m_enabledLook = profile && profile->monitorIndex >= 0;
     update();
 }
 
-void OutputPreviewThumbnail::setResolutionLabel(const QString &label)
+QRect OutputPreviewThumbnail::frameRect() const
 {
-    m_resolutionLabel = label;
-    update();
-}
-
-void OutputPreviewThumbnail::setEnabledLook(bool enabled)
-{
-    m_enabledLook = enabled;
-    update();
+    const QRect available = rect().adjusted(1, 1, -1, -1);
+    if (!m_hasProfile)
+        return available;
+    return SlideRenderer::fittedFrame(available, m_profile.outputPosition.size());
 }
 
 void OutputPreviewThumbnail::paintEvent(QPaintEvent *)
@@ -35,32 +37,32 @@ void OutputPreviewThumbnail::paintEvent(QPaintEvent *)
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
 
-    const QRectF frame = rect().adjusted(1, 1, -1, -1);
     p.setPen(QPen(QColor(m_enabledLook ? "#3a3a3d" : "#2a2a2c"), 1));
     p.setBrush(QColor(m_enabledLook ? "#0e0e10" : "#161617"));
-    p.drawRoundedRect(frame, 3, 3);
+    p.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 3, 3);
 
-    if (!m_resolutionLabel.isEmpty()) {
-        p.setPen(Qt::NoPen);
-        p.setBrush(QColor("#c0392b"));
-        const QRectF badge(frame.right() - 46, frame.top() + 4, 42, 16);
-        p.drawRoundedRect(badge, 3, 3);
-        p.setPen(Qt::white);
-        QFont badgeFont = font();
-        badgeFont.setPointSizeF(badgeFont.pointSizeF() * 0.75);
-        p.setFont(badgeFont);
-        p.drawText(badge, Qt::AlignCenter, m_resolutionLabel);
+    if (!m_hasProfile)
+        return;
+
+    const QRect frame = frameRect();
+
+    Slide sample(tr("Preview"), m_sampleLines.join(QStringLiteral("\n")), Qt::black);
+    SlideRenderer::paint(p, frame, sample, m_profile);
+
+    if (!m_enabledLook) {
+        // Dim the whole rendered frame rather than skipping the render,
+        // so an unassigned output still previews *what* would go out
+        // (font, margins, aspect ratio) -- just visibly inactive.
+        p.fillRect(frame, QColor(10, 10, 11, 150));
     }
 
-    p.setPen(m_enabledLook ? QColor("#e8e8ea") : QColor("#55555a"));
-    QFont sampleFont = font();
-    sampleFont.setPointSizeF(sampleFont.pointSizeF() * 0.85);
-    p.setFont(sampleFont);
+    p.setPen(QPen(QColor(m_enabledLook ? "#3a3a3d" : "#2a2a2c"), 1));
+    p.drawRect(frame.adjusted(0, 0, -1, -1));
 
-    const qreal lineHeight = frame.height() / qMax(1, m_sampleLines.size() + 1);
-    qreal y = frame.top() + lineHeight * 0.6;
-    for (const QString &line : m_sampleLines) {
-        p.drawText(QRectF(frame.left(), y, frame.width(), lineHeight), Qt::AlignHCenter, line);
-        y += lineHeight;
+    if (m_enabledLook) {
+        const QString label = QStringLiteral("%1\u00d7%2")
+                                   .arg(m_profile.outputPosition.width())
+                                   .arg(m_profile.outputPosition.height());
+        SlideRenderer::drawResolutionBadge(p, frame, label);
     }
 }

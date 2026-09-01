@@ -3,13 +3,21 @@
 
 #include <QWidget>
 
+#include "../OutputProfile.h"
+
 // The small "what will actually go out" thumbnail that sits under the
 // category list in SettingsWindow's left column, regardless of which
-// category is selected. It just draws a handful of sample lines over a
-// dark background plus a resolution badge -- enough to reassure the
-// operator that an output is configured, without wiring up a live
-// texture from OutputWindow (that's a natural follow-up once this
-// widget's placement/behavior is settled).
+// category is selected.
+//
+// This used to just draw a handful of fixed sample lines over a dark
+// mockup box plus a resolution badge -- a good-enough placeholder before
+// there was a shared way to actually render a Slide. Now it paints a
+// representative sample slide through the exact same SlideRenderer used
+// by the real congregation-facing OutputWindow and every content-tab
+// preview (Media/Scriptures/Songs/Themes), fed the OutputProfile of
+// whichever category the operator currently has open -- so General's
+// margins, the chosen font, and the destination's real aspect ratio all
+// show up here immediately, not just its resolution number.
 class OutputPreviewThumbnail : public QWidget
 {
     Q_OBJECT
@@ -20,25 +28,26 @@ public:
     QSize sizeHint() const override;
 
 public slots:
-    // Text shown as the sample slide body, and the resolution badge in
-    // the corner (e.g. "1920x1080"). Called by whichever OutputSettingsPage
-    // currently has focus, so the thumbnail always reflects the last
-    // output the operator was editing.
-    void setSampleLines(const QStringList &lines);
-    void setResolutionLabel(const QString &label);
-    void setEnabledLook(bool enabled); // dims the thumbnail when monitorIndex == -1 ("None")
+    // `profile` is the OutputProfile belonging to whichever sidebar
+    // category currently has focus (nullptr for categories that aren't
+    // profile-backed at all, e.g. Service Intervals/Advanced -- shown
+    // dimmed with no badge). See SettingsWindow::refreshPreviewThumbnail.
+    void setProfile(const OutputProfile *profile);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
 
 private:
+    QRect frameRect() const;
+
     QStringList m_sampleLines{
         tr("song text line one"),
         tr("song text line two"),
         tr("song text line three"),
         tr("song text line four"),
     };
-    QString m_resolutionLabel;
+    OutputProfile m_profile;
+    bool m_hasProfile = false;
     bool m_enabledLook = true;
 };
 

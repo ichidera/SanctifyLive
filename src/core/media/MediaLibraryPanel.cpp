@@ -18,7 +18,11 @@
 
 #include "../common/IconFactory.h"
 #include "ImageFramingDialog.h"
+#include "../output/LiveAppearancePreview.h"
+#include "../schedule/Slide.h"
 #include "../scripture/ScripturePanel.h"
+#include "../song/SongPanel.h"
+#include "../theme/ThemePanel.h"
 
 namespace {
 constexpr int kGridIconSize = 64;
@@ -127,7 +131,9 @@ MediaLibraryPanel::MediaLibraryPanel(QWidget *parent) : QWidget(parent)
     // ---------- Content-type tab row ----------
     m_contentTabs = new QTabWidget(this);
 
-    m_contentTabs->addTab(new QWidget(this), tr("Songs"));
+    m_songPanel = new SongPanel(this);
+    connect(m_songPanel, &SongPanel::songSlideActivated, this, &MediaLibraryPanel::songSlideActivated);
+    m_contentTabs->addTab(m_songPanel, tr("Songs"));
 
     m_scripturePanel = new ScripturePanel(this);
     connect(m_scripturePanel, &ScripturePanel::scriptureActivated, this, &MediaLibraryPanel::scriptureActivated);
@@ -212,22 +218,21 @@ MediaLibraryPanel::MediaLibraryPanel(QWidget *parent) : QWidget(parent)
     gridPanelLayout->addLayout(gridHeaderLayout);
     gridPanelLayout->addWidget(m_mediaGrid, 1);
 
-    // Preview panel
-    m_previewImage = new QLabel(mediaTab);
-    m_previewImage->setMinimumSize(kPreviewSize, kPreviewSize * 9 / 16);
-    m_previewImage->setAlignment(Qt::AlignCenter);
-    m_previewImage->setStyleSheet("background-color: #0f0f11; border: 1px solid #333;");
-    m_previewImage->setScaledContents(false);
-    m_previewCaption = new QLabel(mediaTab);
-    m_previewCaption->setAlignment(Qt::AlignCenter);
-    m_previewCaption->setStyleSheet("color: #cfcfcf; padding-top: 4px;");
+    // Preview panel -- renders through the same LiveAppearancePreview
+    // every other content tab uses, so this shows exactly how the
+    // selected entry will crop/fit/appear on the real configured output
+    // (see src/core/output/LiveAppearancePreview.h), not just an
+    // unscaled thumbnail of the source file.
+    m_preview = new LiveAppearancePreview(mediaTab);
+
+    auto *previewCaption = new QLabel(tr("Live Appearance"), mediaTab);
+    previewCaption->setStyleSheet("color: #888;");
 
     auto *previewPanel = new QWidget(mediaTab);
     auto *previewPanelLayout = new QVBoxLayout(previewPanel);
     previewPanelLayout->setContentsMargins(0, 0, 0, 0);
-    previewPanelLayout->addWidget(m_previewImage);
-    previewPanelLayout->addWidget(m_previewCaption);
-    previewPanelLayout->addStretch(1);
+    previewPanelLayout->addWidget(previewCaption);
+    previewPanelLayout->addWidget(m_preview, 1);
 
     // All three columns sit in a splitter so the user can resize them
     // however they like -- same convention as the rest of the app.
@@ -249,12 +254,13 @@ MediaLibraryPanel::MediaLibraryPanel(QWidget *parent) : QWidget(parent)
 
     m_contentTabs->addTab(mediaTab, tr("Media"));
     m_contentTabs->addTab(new QWidget(this), tr("Presentations"));
-    m_contentTabs->addTab(new QWidget(this), tr("Themes"));
+
+    m_themePanel = new ThemePanel(this);
+    connect(m_themePanel, &ThemePanel::themeActivated, this, &MediaLibraryPanel::themeActivated);
+    m_contentTabs->addTab(m_themePanel, tr("Themes"));
 
     const int mediaTabIndex = m_contentTabs->indexOf(mediaTab);
-    m_contentTabs->setTabEnabled(0, false); // Songs
-    m_contentTabs->setTabEnabled(mediaTabIndex + 1, false); // Presentations
-    m_contentTabs->setTabEnabled(mediaTabIndex + 2, false); // Themes
+    m_contentTabs->setTabEnabled(mediaTabIndex + 1, false); // Presentations -- no slide-deck pipeline yet
     Q_UNUSED(scripturesTabIndex); // enabled by default; kept for clarity at the call site above
     m_contentTabs->setCurrentIndex(mediaTabIndex);
 
@@ -336,8 +342,7 @@ void MediaLibraryPanel::rebuildGridForCategory(const QString &category)
 
     if (items.isEmpty()) {
         m_itemCountLabel->setText(tr("No items yet"));
-        m_previewImage->setPixmap(QPixmap());
-        m_previewCaption->clear();
+        m_preview->clearSlide();
     } else {
         m_itemCountLabel->setText(items.size() == 1 ? tr("1 item") : tr("%1 items").arg(items.size()));
         m_mediaGrid->setCurrentRow(0);
@@ -348,20 +353,18 @@ void MediaLibraryPanel::onGridSelectionChanged()
 {
     QListWidgetItem *item = m_mediaGrid->currentItem();
     if (!item) {
-        m_previewImage->setPixmap(QPixmap());
-        m_previewCaption->clear();
+        m_preview->clearSlide();
         return;
     }
 
+    const QString label = item->text();
+    const QColor color = item->data(Qt::UserRole).value<QColor>();
     const QString imagePath = item->data(Qt::UserRole + 1).toString();
-    if (!imagePath.isEmpty()) {
-        const QPixmap source(imagePath);
-        m_previewImage->setPixmap(source.scaled(m_previewImage->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    } else {
-        const QColor color = item->data(Qt::UserRole).value<QColor>();
-        m_previewImage->setPixmap(makeSwatch(color, kPreviewSize));
-    }
-    m_previewCaption->setText(item->text());
+    const QPointF focus = item->data(Qt::UserRole + 2).toPointF();
+    // Exact same construction OperatorWindow::onMediaActivated uses when
+    // this entry is actually sent live -- see Slide::fromMediaEntry --
+    // so the preview can't show anything the real output wouldn't.
+    m_preview->setSlide(Slide::fromMediaEntry(label, color, imagePath, focus));
 }
 
 void MediaLibraryPanel::onGridItemActivated(QListWidgetItem *item)
@@ -442,4 +445,18 @@ void MediaLibraryPanel::onImportClicked()
 
     rebuildGridForCategory(m_currentCategory);
     m_mediaGrid->setCurrentRow(m_mediaGrid->count() - 1);
+}
+
+void MediaLibraryPanel::setOutputProfile(const OutputProfile &profile)
+{
+    // Fans a single "this is the current Main Output profile" update out
+    // to every preview in this whole tab bar -- Media's own, plus each
+    // of Scriptures/Songs/Themes' -- so a resolution/margin/font change
+    // in Options shows up everywhere at once. See OperatorWindow's
+    // connection of SettingsWindow::mainOutputProfileChanged into this
+    // slot for where the update originates.
+    m_preview->setProfile(profile);
+    m_scripturePanel->setOutputProfile(profile);
+    m_songPanel->setOutputProfile(profile);
+    m_themePanel->setOutputProfile(profile);
 }

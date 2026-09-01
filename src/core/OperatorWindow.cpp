@@ -29,6 +29,7 @@
 #include "media/MediaLibraryPanel.h"
 #include "output/OutputWindow.h"
 #include "schedule/ScheduleModel.h"
+#include "scripture/ScriptureFormatting.h"
 #include "settings/SettingsWindow.h"
 #include "remote/SlideServer.h"
 
@@ -86,6 +87,12 @@ OperatorWindow::OperatorWindow(QWidget *parent)
     m_outputWindow->setParent(this, Qt::Window);
     m_liveEditorView = new OutputWindow(m_model, OutputWindow::Source::Preview, this);
     m_liveOutputView = new OutputWindow(m_model, OutputWindow::Source::Live, this);
+    // Give all three the same default profile MediaLibraryPanel's
+    // previews start with (see buildWorkspace()) so the real output and
+    // every in-app preview agree even before Options has been opened.
+    m_outputWindow->setProfile(m_mainOutputProfile);
+    m_liveEditorView->setProfile(m_mainOutputProfile);
+    m_liveOutputView->setProfile(m_mainOutputProfile);
 
     buildMenuBar();
     buildToolBar();
@@ -336,6 +343,11 @@ QWidget *OperatorWindow::buildWorkspace()
     connect(m_mediaLibrary, &MediaLibraryPanel::mediaActivated, this, &OperatorWindow::onMediaActivated);
     connect(m_mediaLibrary, &MediaLibraryPanel::mediaSentToPhone, this, &OperatorWindow::onMediaSentToPhone);
     connect(m_mediaLibrary, &MediaLibraryPanel::scriptureActivated, this, &OperatorWindow::onScriptureActivated);
+    connect(m_mediaLibrary, &MediaLibraryPanel::songSlideActivated, this, &OperatorWindow::onSongSlideActivated);
+    // Themes send live exactly like Media (a full-screen background) --
+    // reuse the same slot rather than duplicating it.
+    connect(m_mediaLibrary, &MediaLibraryPanel::themeActivated, this, &OperatorWindow::onMediaActivated);
+    m_mediaLibrary->setOutputProfile(m_mainOutputProfile);
 
     // ---------- Overall vertical split ----------
     auto *mainSplitter = new QSplitter(Qt::Vertical, this);
@@ -388,22 +400,16 @@ void OperatorWindow::onScheduleRowChanged(int row)
 void OperatorWindow::onMediaActivated(const QString &label, const QColor &background, const QString &imagePath,
                                       const QPointF &focus)
 {
-    // A real imported image supplies its own visual, so no text overlay;
-    // the placeholder color swatches show their label as overlay text
-    // since they have no actual picture to display.
-    Slide slide(label, imagePath.isEmpty() ? label : QString(), background);
-    slide.backgroundImagePath = imagePath;
-    slide.backgroundFocus = focus;
-    m_model->sendMediaLive(slide);
+    // Same construction the Media/Themes preview uses (Slide::fromMediaEntry,
+    // src/core/schedule/Slide.h) so what actually goes live is guaranteed
+    // to match what the operator just previewed.
+    m_model->sendMediaLive(Slide::fromMediaEntry(label, background, imagePath, focus));
 }
 
 void OperatorWindow::onMediaSentToPhone(const QString &label, const QColor &background, const QString &imagePath,
                                         const QPointF &focus)
 {
-    Slide slide(label, imagePath.isEmpty() ? label : QString(), background);
-    slide.backgroundImagePath = imagePath;
-    slide.backgroundFocus = focus;
-    m_model->sendPhoneOverride(slide);
+    m_model->sendPhoneOverride(Slide::fromMediaEntry(label, background, imagePath, focus));
 }
 
 void OperatorWindow::onSendLiveToPhoneOnly()
@@ -423,9 +429,21 @@ void OperatorWindow::onScriptureActivated(const QString &reference, const QStrin
     // The reference (e.g. "John 3:16") becomes the slide's operator-only
     // label; the verse text itself -- annotated with the translation
     // code, the way most projection software footnotes Scripture -- is
-    // what's actually projected.
-    const QString projected = QStringLiteral("%1\n\n%2 (%3)").arg(text, reference, translationCode);
+    // what's actually projected. Same composeProjectedScripture() call
+    // ScripturePanel's own preview makes (see ScripturePanel::updatePreview
+    // and src/core/scripture/ScriptureFormatting.h), so "Send Selected"
+    // can never put something on screen the preview didn't already show.
+    const QString projected = composeProjectedScripture(text, reference, translationCode);
     m_model->sendMediaLive(Slide(reference, projected, Qt::black));
+}
+
+void OperatorWindow::onSongSlideActivated(const QString &songTitle, const QString &slideText)
+{
+    // slideText already has title-prefixing/line-splitting applied by
+    // SongPanel::composeSlides() per the current profile's Song settings
+    // -- see SongPanel.cpp -- so it's projected as-is, same as the
+    // Songs tab's own preview showed.
+    m_model->sendMediaLive(Slide(songTitle, slideText, Qt::black));
 }
 
 void OperatorWindow::onEditOptions()
@@ -434,6 +452,8 @@ void OperatorWindow::onEditOptions()
         m_settingsWindow = new SettingsWindow(m_model, m_slideServer, this);
         connect(m_settingsWindow, &SettingsWindow::mainOutputChanged,
                 this, &OperatorWindow::onMainOutputConfigured);
+        connect(m_settingsWindow, &SettingsWindow::mainOutputProfileChanged,
+                this, &OperatorWindow::onMainOutputProfileChanged);
     }
 
     m_settingsWindow->show();
@@ -452,6 +472,23 @@ void OperatorWindow::onMainOutputConfigured(int monitorIndex, const QRect &posit
     // the operator just told us where it belongs.
     if (m_outputWindow->isVisible())
         showOutputWindow();
+}
+
+void OperatorWindow::onMainOutputProfileChanged(const OutputProfile &profile)
+{
+    m_mainOutputProfile = profile;
+
+    // The real congregation-facing window and both its in-app mirrors
+    // all need the new margins/font/resolution immediately, not just on
+    // the next slide change.
+    m_outputWindow->setProfile(profile);
+    m_liveEditorView->setProfile(profile);
+    m_liveOutputView->setProfile(profile);
+
+    // ...and every preview in the bottom resource library (Media's own,
+    // plus Scriptures/Songs/Themes) needs to stay in lock-step with what
+    // the real output now looks like.
+    m_mediaLibrary->setOutputProfile(profile);
 }
 
 void OperatorWindow::onScheduleChanged()

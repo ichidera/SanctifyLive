@@ -19,6 +19,9 @@
 #include <QVBoxLayout>
 
 #include "../common/IconFactory.h"
+#include "../output/LiveAppearancePreview.h"
+#include "../schedule/Slide.h"
+#include "ScriptureFormatting.h"
 #include "ScriptureSearchEdit.h"
 #include "TranslationLibraryDialog.h"
 
@@ -127,6 +130,7 @@ ScripturePanel::ScripturePanel(QWidget *parent) : QWidget(parent)
     m_verseList->setAlternatingRowColors(true);
     connect(m_verseList, &QListWidget::itemActivated, this, &ScripturePanel::onVerseItemActivated);
     connect(m_verseList, &QListWidget::itemDoubleClicked, this, &ScripturePanel::onVerseItemActivated);
+    connect(m_verseList, &QListWidget::itemSelectionChanged, this, &ScripturePanel::onVerseSelectionChanged);
 
     m_sendSelectedButton = new QPushButton(tr("Send Selected \u25B6"), this);
     m_sendSelectedButton->setToolTip(
@@ -140,13 +144,28 @@ ScripturePanel::ScripturePanel(QWidget *parent) : QWidget(parent)
     versePanelLayout->addWidget(m_verseList, 1);
     versePanelLayout->addWidget(m_sendSelectedButton);
 
+    // Live-appearance preview -- driven by the verse list's selection
+    // (see onVerseSelectionChanged/updatePreview), through the exact same
+    // composition (composeProjectedScripture) and rendering
+    // (LiveAppearancePreview/SlideRenderer) that "Send Selected" and
+    // double-click actually use, so what's shown here is guaranteed to
+    // match what goes out.
+    m_preview = new LiveAppearancePreview(this);
+    auto *previewPanel = new QWidget(this);
+    auto *previewPanelLayout = new QVBoxLayout(previewPanel);
+    previewPanelLayout->setContentsMargins(0, 0, 0, 0);
+    previewPanelLayout->addWidget(new QLabel(tr("Live Appearance"), previewPanel));
+    previewPanelLayout->addWidget(m_preview, 1);
+
     auto *bodySplitter = new QSplitter(this);
     bodySplitter->addWidget(m_bookTree);
     bodySplitter->addWidget(chapterPanel);
     bodySplitter->addWidget(versePanel);
+    bodySplitter->addWidget(previewPanel);
     bodySplitter->setStretchFactor(0, 2);
     bodySplitter->setStretchFactor(1, 2);
     bodySplitter->setStretchFactor(2, 4);
+    bodySplitter->setStretchFactor(3, 3);
 
     m_footerLabel = new QLabel(this);
     m_footerLabel->setStyleSheet("color: #888; padding: 2px 6px;");
@@ -168,6 +187,7 @@ ScripturePanel::ScripturePanel(QWidget *parent) : QWidget(parent)
         m_verseList->setEnabled(false);
         m_sendSelectedButton->setEnabled(false);
         m_footerLabel->setText(m_library.lastError());
+        m_preview->clearSlide();
         return;
     }
 
@@ -441,9 +461,21 @@ void ScripturePanel::onVerseItemActivated(QListWidgetItem *item)
 
 void ScripturePanel::onSendSelectedClicked()
 {
+    QString book;
+    int chapter = 0;
+    int verseStart = 0;
+    int verseEnd = 0;
+    if (!resolveSelectionRange(&book, &chapter, &verseStart, &verseEnd))
+        return;
+    sendVerses(book, chapter, verseStart, verseEnd);
+}
+
+bool ScripturePanel::resolveSelectionRange(QString *outBook, int *outChapter, int *outVerseStart,
+                                            int *outVerseEnd) const
+{
     const QList<QListWidgetItem *> selected = m_verseList->selectedItems();
     if (selected.isEmpty())
-        return;
+        return false;
 
     // Sort by row so a shift-click range comes out in reading order.
     QList<QListWidgetItem *> ordered = selected;
@@ -457,22 +489,27 @@ void ScripturePanel::onSendSelectedClicked()
         return item->data(kVerseRole).toString() == book && item->data(kChapterRole).toInt() == chapter;
     });
 
+    *outBook = book;
+    *outChapter = chapter;
     if (!sameBookChapter) {
         // Discontiguous multi-book selection (only reachable from search
-        // results): sending a single combined slide doesn't make sense,
-        // so just send the first one and let the operator send the rest
-        // individually.
-        sendVerses(book, chapter, ordered.first()->data(kVerseNumRole).toInt(),
-                   ordered.first()->data(kVerseNumRole).toInt());
-        return;
+        // results): a single combined slide doesn't make sense, so this
+        // resolves to just the first item -- the operator can send the
+        // rest individually. Both the real send and the preview follow
+        // this same rule, so the preview never implies more will be sent
+        // than actually will be.
+        *outVerseStart = ordered.first()->data(kVerseNumRole).toInt();
+        *outVerseEnd = *outVerseStart;
+        return true;
     }
 
-    const int verseStart = ordered.first()->data(kVerseNumRole).toInt();
-    const int verseEnd = ordered.last()->data(kVerseNumRole).toInt();
-    sendVerses(book, chapter, verseStart, verseEnd);
+    *outVerseStart = ordered.first()->data(kVerseNumRole).toInt();
+    *outVerseEnd = ordered.last()->data(kVerseNumRole).toInt();
+    return true;
 }
 
-void ScripturePanel::sendVerses(const QString &book, int chapter, int verseStart, int verseEnd)
+bool ScripturePanel::composeVerses(const QString &book, int chapter, int verseStart, int verseEnd,
+                                    QString *outReference, QString *outText) const
 {
     const QString code = currentTranslationCode();
     QStringList lines;
@@ -486,13 +523,68 @@ void ScripturePanel::sendVerses(const QString &book, int chapter, int verseStart
         }
     }
     if (lines.isEmpty())
-        return;
+        return false;
 
     const QString reference = (verseEnd > verseStart)
         ? QStringLiteral("%1 %2:%3-%4").arg(book).arg(chapter).arg(verseStart).arg(verseEnd)
         : QStringLiteral("%1 %2:%3").arg(book).arg(chapter).arg(verseStart);
 
-    emit scriptureActivated(reference, lines.join(QStringLiteral("\n")), code);
+    // The RAW verse text (no footnote) -- this is what scriptureActivated
+    // has always carried; OperatorWindow::onScriptureActivated is what
+    // appends the "Reference (TRANSLATION)" footnote via
+    // composeProjectedScripture before actually projecting it. See
+    // updatePreview() below for how the preview mirrors that same
+    // second step so it shows exactly what will be projected, not just
+    // the raw verse body.
+    if (outReference)
+        *outReference = reference;
+    if (outText)
+        *outText = lines.join(QStringLiteral("\n"));
+    return true;
+}
+
+void ScripturePanel::sendVerses(const QString &book, int chapter, int verseStart, int verseEnd)
+{
+    QString reference;
+    QString text;
+    if (!composeVerses(book, chapter, verseStart, verseEnd, &reference, &text))
+        return;
+
+    emit scriptureActivated(reference, text, currentTranslationCode());
+}
+
+void ScripturePanel::onVerseSelectionChanged()
+{
+    updatePreview();
+}
+
+void ScripturePanel::updatePreview()
+{
+    QString book;
+    int chapter = 0;
+    int verseStart = 0;
+    int verseEnd = 0;
+    if (!resolveSelectionRange(&book, &chapter, &verseStart, &verseEnd)) {
+        m_preview->clearSlide();
+        return;
+    }
+
+    QString reference;
+    QString text;
+    if (!composeVerses(book, chapter, verseStart, verseEnd, &reference, &text)) {
+        m_preview->clearSlide();
+        return;
+    }
+
+    // Same composeProjectedScripture() call OperatorWindow::onScriptureActivated
+    // makes for the real send -- see src/core/scripture/ScriptureFormatting.h.
+    const QString projected = composeProjectedScripture(text, reference, currentTranslationCode());
+    m_preview->setSlide(Slide(reference, projected, Qt::black));
+}
+
+void ScripturePanel::setOutputProfile(const OutputProfile &profile)
+{
+    m_preview->setProfile(profile);
 }
 
 void ScripturePanel::onLiveWordQuery(const QString &text)

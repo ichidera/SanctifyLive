@@ -6,6 +6,8 @@
 #include <QPointF>
 #include <QRect>
 
+#include "settings/OutputProfile.h"
+
 class QListWidget;
 class QListWidgetItem;
 class QLabel;
@@ -69,6 +71,7 @@ private slots:
     void onMediaSentToPhone(const QString &label, const QColor &background, const QString &imagePath,
                             const QPointF &focus);
     void onScriptureActivated(const QString &reference, const QString &text, const QString &translationCode);
+    void onSongSlideActivated(const QString &songTitle, const QString &slideText);
     void onLiveContentChanged();
     void onScheduleChanged();
 
@@ -79,6 +82,7 @@ private slots:
     void onLiveOutputToggled(bool checked);
     void onEditOptions();
     void onMainOutputConfigured(int monitorIndex, const QRect &position);
+    void onMainOutputProfileChanged(const OutputProfile &profile);
     void onAbout();
     void onDisplayClientCountChanged(int count);
     void onWakeDisplayClicked();
@@ -113,6 +117,16 @@ private:
     bool m_mainOutputConfigured = false;
     int m_mainOutputMonitorIndex = -1;
     QRect m_mainOutputPosition;
+
+    // The full committed Main Output profile (resolution, margins, font)
+    // -- distinct from the monitorIndex/position pair above, which is
+    // only what's needed to physically place the real OutputWindow.
+    // Default-constructed (1920x1080, no margins) until Options > Main
+    // Output has been opened and OK'd at least once this session; handed
+    // to every OutputWindow instance and to MediaLibraryPanel (which fans
+    // it out to Scriptures/Songs/Themes) so every preview and the real
+    // output stay in sync. See onMainOutputProfileChanged().
+    OutputProfile m_mainOutputProfile;
 
     // Panel containers, kept as members so the View menu can toggle them.
     QWidget *m_schedulePanel;

@@ -64,6 +64,13 @@ signals:
     // at whatever monitor was just chosen for Main Output.
     void mainOutputChanged(int monitorIndex, const QRect &position);
 
+    // Fired alongside mainOutputChanged, also only on OK: the full
+    // committed Main Output profile, for anything that needs more than
+    // just monitor/position to render an accurate preview (margins,
+    // default font, resolution) -- see LiveAppearancePreview and
+    // OutputWindow::setProfile.
+    void mainOutputProfileChanged(const OutputProfile &profile);
+
 protected:
     void showEvent(QShowEvent *event) override;
 

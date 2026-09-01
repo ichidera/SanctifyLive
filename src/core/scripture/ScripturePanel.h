@@ -5,6 +5,7 @@
 #include <QWidget>
 
 #include "BibleLibrary.h"
+#include "../settings/OutputProfile.h"
 
 class QListWidget;
 class QListWidgetItem;
@@ -15,6 +16,7 @@ class QPushButton;
 class QToolButton;
 class QMenu;
 class ScriptureSearchEdit;
+class LiveAppearancePreview;
 
 // ScripturePanel: the "Scriptures" content-type tab of the bottom
 // resource library, laid out the way EasyWorship's Scripture panel
@@ -42,11 +44,18 @@ class ScriptureSearchEdit;
 // simple folder/collection organizers for translations, mirroring
 // EasyWorship's "+" menu.
 //
-// Actually showing something live is left to whoever owns this widget:
+// Actually sending something live is left to whoever owns this widget:
 // on scriptureActivated(), the caller is expected to build a Slide and
 // send it live (see OperatorWindow::onScriptureActivated), the same way
-// MediaLibraryPanel::mediaActivated already works. This panel does not
-// implement (and intentionally does not touch) the live preview itself.
+// MediaLibraryPanel::mediaActivated already works.
+//
+// This panel DOES own its live-appearance preview, though (the verse
+// list's selection drives it) -- it uses the shared LiveAppearancePreview
+// widget and the same composeProjectedScripture() helper that
+// OperatorWindow::onScriptureActivated uses to build what actually gets
+// projected, so the preview can never show different text than what
+// "Send Selected" / double-click would actually put on screen. See
+// src/core/scripture/ScriptureFormatting.h.
 class ScripturePanel : public QWidget
 {
     Q_OBJECT
@@ -60,10 +69,16 @@ signals:
     // "Romans 8:28-30"; text is the verse (or joined verses) to project.
     void scriptureActivated(const QString &reference, const QString &text, const QString &translationCode);
 
+public slots:
+    // Which destination's resolution/margins/font this panel's preview
+    // should represent. See LiveAppearancePreview::setProfile.
+    void setOutputProfile(const OutputProfile &profile);
+
 private slots:
     void onBookSelected(QTreeWidgetItem *item, int column);
     void onChapterSelected(QListWidgetItem *item);
     void onVerseItemActivated(QListWidgetItem *item);
+    void onVerseSelectionChanged();
     void onSendSelectedClicked();
     void onSearchSubmitted();
     void onLiveWordQuery(const QString &text);
@@ -78,6 +93,23 @@ private:
     void showSearchResults(const QVector<BibleLibrary::SearchResult> &results, const QString &query);
     void jumpToReference(const BibleLibrary::ParsedReference &ref);
     void updateFooter();
+    void updatePreview();
+    // Given the verse list's current selection, resolves it to a single
+    // book/chapter/verse-range using the same "if the selection isn't
+    // all one book & chapter, just use the first item" rule
+    // onSendSelectedClicked has always used for discontiguous
+    // (search-result) selections. Returns false (selection empty) if
+    // there's nothing to resolve. Shared by onSendSelectedClicked (the
+    // real "go live" path) and updatePreview(), so both act on the
+    // exact same interpretation of what's selected.
+    bool resolveSelectionRange(QString *outBook, int *outChapter, int *outVerseStart, int *outVerseEnd) const;
+    // Builds the reference string and the fully composed projected text
+    // (verse body + "Reference (TRANSLATION)" footnote, via
+    // composeProjectedScripture) for one book/chapter/verse-range.
+    // Shared by sendVerses() and updatePreview() so the preview can
+    // never show different text than what actually gets sent live.
+    bool composeVerses(const QString &book, int chapter, int verseStart, int verseEnd, QString *outReference,
+                        QString *outText) const;
     void sendVerses(const QString &book, int chapter, int verseStart, int verseEnd);
     QString currentTranslationCode() const;
     void selectTranslation(const QString &code);
@@ -101,6 +133,7 @@ private:
     QListWidget *m_verseList;
     QPushButton *m_sendSelectedButton;
     QLabel *m_footerLabel;
+    LiveAppearancePreview *m_preview;
 
     QString m_currentTranslationCode;
     QString m_currentBook;

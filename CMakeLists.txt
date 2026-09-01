@@ -40,6 +40,10 @@ add_executable(SanctifyLive
     # congregation-facing window and both in-app preview panes.
     src/core/output/OutputWindow.h
     src/core/output/OutputWindow.cpp
+    src/core/output/SlideRenderer.h
+    src/core/output/SlideRenderer.cpp
+    src/core/output/LiveAppearancePreview.h
+    src/core/output/LiveAppearancePreview.cpp
 
     # media: the resource library grid (images/video/audio placeholders)
     # plus its background-image crop/framing editor.
@@ -57,6 +61,15 @@ add_executable(SanctifyLive
     src/core/scripture/TranslationLibraryDialog.cpp
     src/core/scripture/ScripturePanel.h
     src/core/scripture/ScripturePanel.cpp
+    src/core/scripture/ScriptureFormatting.h
+
+    src/core/song/SongPanel.h
+    src/core/song/SongPanel.cpp
+    src/core/song/SongEditorDialog.h
+    src/core/song/SongEditorDialog.cpp
+
+    src/core/theme/ThemePanel.h
+    src/core/theme/ThemePanel.cpp
 
     # history: the "recently shown" strip above the live workspace.
     src/core/history/HistoryBar.h

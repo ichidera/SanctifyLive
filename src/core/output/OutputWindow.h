@@ -4,6 +4,8 @@
 
 #include <QWidget>
 
+#include "../settings/OutputProfile.h"
+
 class ScheduleModel;
 
 // OutputWindow renders a slide from the ScheduleModel. It has two modes:
@@ -32,6 +34,15 @@ public:
 
     explicit OutputWindow(ScheduleModel *model, Source source, QWidget *parent = nullptr);
 
+public slots:
+    // Which destination's resolution/margins/font this window should
+    // render with -- see SlideRenderer::paint. Defaults to a plain
+    // OutputProfile() until OperatorWindow has an actual committed Main
+    // Output profile to hand over (see OperatorWindow::m_mainOutputProfile
+    // and onMainOutputProfileChanged()), so this window renders sensibly
+    // even before Options has ever been opened this session.
+    void setProfile(const OutputProfile &profile);
+
 protected:
     void paintEvent(QPaintEvent *event) override;
 
@@ -41,6 +52,7 @@ private slots:
 private:
     ScheduleModel *m_model;
     Source m_source;
+    OutputProfile m_profile;
 };
 
 #endif // SANCTIFYLIVE_CORE_OUTPUTWINDOW_H_

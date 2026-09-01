@@ -4,6 +4,7 @@
 #include <QPaintEvent>
 
 #include "../schedule/ScheduleModel.h"
+#include "SlideRenderer.h"
 
 OutputWindow::OutputWindow(ScheduleModel *model, Source source, QWidget *parent)
     : QWidget(parent), m_model(model), m_source(source)
@@ -29,12 +30,17 @@ void OutputWindow::onContentChanged()
     update();
 }
 
+void OutputWindow::setProfile(const OutputProfile &profile)
+{
+    m_profile = profile;
+    update();
+}
+
 void OutputWindow::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event);
 
     QPainter painter(this);
-    painter.setRenderHint(QPainter::Antialiasing);
 
     const Slide *slide = (m_source == Source::Live) ? m_model->liveSlide() : m_model->previewSlide();
 
@@ -46,44 +52,10 @@ void OutputWindow::paintEvent(QPaintEvent *event)
         return;
     }
 
-    if (!slide->backgroundImagePath.isEmpty()) {
-        const QPixmap pixmap(slide->backgroundImagePath);
-        if (!pixmap.isNull()) {
-            // Cover-fit: scale to fill the widget, cropping any overflow,
-            // same idea as CSS background-size: cover. The crop window is
-            // biased toward the slide's focus point (default dead-center,
-            // reproducing the old behavior exactly) rather than always
-            // centering, so an operator can keep a photo's actual subject
-            // in frame even when this window's aspect ratio doesn't match
-            // the source image's -- see Slide::backgroundFocus.
-            const QPixmap scaled = pixmap.scaled(size(), Qt::KeepAspectRatioByExpanding,
-                                                  Qt::SmoothTransformation);
-            const int maxX = qMax(0, scaled.width() - width());
-            const int maxY = qMax(0, scaled.height() - height());
-            const int x = qBound(0, qRound(slide->backgroundFocus.x() * scaled.width()
-                                            - width() / 2.0), maxX);
-            const int y = qBound(0, qRound(slide->backgroundFocus.y() * scaled.height()
-                                            - height() / 2.0), maxY);
-            const QRect sourceRect(x, y, width(), height());
-            painter.drawPixmap(rect(), scaled, sourceRect);
-        } else {
-            // File went missing/unreadable since it was imported -- fail
-            // back to the solid color rather than showing nothing.
-            painter.fillRect(rect(), slide->background);
-        }
-    } else {
-        painter.fillRect(rect(), slide->background);
-    }
-
-    if (slide->text.isEmpty())
-        return;
-
-    QFont font = painter.font();
-    font.setPixelSize(qMax(12, height() / 8));
-    font.setBold(true);
-    painter.setFont(font);
-
-    painter.setPen(Qt::white);
-    QRect textRect = rect().adjusted(40, 40, -40, -40);
-    painter.drawText(textRect, Qt::AlignCenter | Qt::TextWordWrap, slide->text);
+    // Same rendering code the in-app previews use (see
+    // src/core/output/SlideRenderer.h) -- this window fills the whole
+    // widget, so targetRect == rect() means margins/font are drawn at
+    // their real configured size, not scaled down the way a small
+    // preview panel's frame would be.
+    SlideRenderer::paint(painter, rect(), *slide, m_profile);
 }

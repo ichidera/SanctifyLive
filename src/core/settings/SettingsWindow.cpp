@@ -200,6 +200,12 @@ void SettingsWindow::onOkClicked()
     m_committedFoldbackProfile = m_foldbackProfile;
     m_committedAndroidProfile = m_androidProfile;
     emit mainOutputChanged(m_committedMainOutputProfile.monitorIndex, m_committedMainOutputProfile.outputPosition);
+    // Separate from mainOutputChanged above (which only carries what
+    // OperatorWindow needs to physically place the real output window)
+    // so every live-appearance preview elsewhere in the app -- Media,
+    // Scriptures, Songs, Themes, and the real OutputWindow instances
+    // themselves -- can pick up margins/font/resolution changes too.
+    emit mainOutputProfileChanged(m_committedMainOutputProfile);
     close();
 }
 
@@ -227,14 +233,5 @@ void SettingsWindow::refreshPreviewThumbnail()
     default: break;
     }
 
-    if (!profile) {
-        m_previewThumbnail->setEnabledLook(false);
-        m_previewThumbnail->setResolutionLabel(QString());
-        return;
-    }
-
-    m_previewThumbnail->setEnabledLook(profile->monitorIndex >= 0);
-    m_previewThumbnail->setResolutionLabel(profile->monitorIndex >= 0
-        ? QStringLiteral("%1x%2").arg(profile->outputPosition.width()).arg(profile->outputPosition.height())
-        : tr("None"));
+    m_previewThumbnail->setProfile(profile);
 }

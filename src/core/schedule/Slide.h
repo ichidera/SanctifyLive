@@ -41,6 +41,25 @@ struct Slide
         : label(std::move(label_)), text(std::move(text_)), background(background_)
     {
     }
+
+    // Shared by every place that turns a media-library-style entry (a
+    // label, a fallback color, an optional real image, and a crop focus
+    // point) into a Slide -- currently OperatorWindow::onMediaActivated /
+    // onMediaSentToPhone for the real Media tab, and the Themes tab,
+    // plus the live-appearance preview both of those feed. Keeping this
+    // one function is what guarantees a theme/media preview can never
+    // silently drift from what actually goes out when the same entry is
+    // sent live: a real image supplies its own visual (no text overlay);
+    // a placeholder swatch shows its label as the overlay text instead,
+    // since it has no picture of its own to display.
+    static Slide fromMediaEntry(const QString &label, const QColor &background, const QString &imagePath,
+                                 const QPointF &focus)
+    {
+        Slide slide(label, imagePath.isEmpty() ? label : QString(), background);
+        slide.backgroundImagePath = imagePath;
+        slide.backgroundFocus = focus;
+        return slide;
+    }
 };
 
 #endif // SANCTIFYLIVE_CORE_SLIDE_H_
