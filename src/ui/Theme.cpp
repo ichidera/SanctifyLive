@@ -82,7 +82,7 @@ QString stylesheet()
             color: white;
         }
 
-        /* ---- Panels: Preview / Live / Media / Queue cards ---- */
+        /* ---- Panels: Schedule / Preview / Live / Media / History cards ---- */
         QFrame#panelCard {
             background-color: %3;
             border: 1px solid %4;
@@ -136,7 +136,7 @@ QString stylesheet()
             border-bottom: none;
         }
 
-        /* ---- Lists / Trees (Queue, Media folder tree) ---- */
+        /* ---- Lists / Trees (Schedule, History, Media folder tree) ---- */
         QListWidget, QTreeWidget {
             background-color: %3;
             border: 1px solid %4;

@@ -26,9 +26,22 @@ core so the project stays easy to reason about as features are added.
 
 Current milestone:
 
-- **Schedule list** — add/remove plain-text slides, reorder by selecting.
-- **Live control loop** — Next / Previous / Black, plus keyboard shortcuts
-  (arrow keys, space, `B`), all driving a single source-of-truth model.
+- **Operator console layout** — a dark, broadcast-console-style window,
+  closer to OpenLP's Service Manager / Preview / Live arrangement than a
+  single stacked list: a top toolbar (session actions + the live
+  transport), a main row of **Schedule / Preview / Live** panels side by
+  side, and a bottom content strip (Songs / Scriptures / Media /
+  Presentations / Themes tabs) alongside **History** (a log of what's
+  actually gone live) and **Transcription** (a placeholder for now).
+- **Preview vs. Live** — clicking a Schedule row stages it in the Preview
+  pane without touching the congregation-facing output; double-clicking
+  it (or using Next/Previous/keyboard shortcuts) commits it live.
+- **History** — an append-only, most-recent-first log of every slide
+  that's actually gone live, timestamped, independent of the Schedule
+  (which is the plan, not the record).
+- **Live control loop** — Next / Previous / Black / Clear, plus keyboard
+  shortcuts (arrow keys, space, `B`), all driving a single
+  source-of-truth model.
 - **Two-window output** — a real output window (send it to a projector,
   full-screen) and an in-app live preview, both fed by the same model so
   they never disagree about what's live.
@@ -37,10 +50,23 @@ Current milestone:
   on, so a 1080p confidence monitor, a 720p projector, and a small preview
   thumbnail all show pixel-faithful, correctly laid-out copies of the same
   frame. See [How it works](#how-it-works).
+- **Save/Open schedules** — a service's slide queue can be saved to and
+  loaded from a `.json` file (`core/model/ScheduleIO`), independent of
+  the UI that triggers it.
+- **Media tab** — a cosmetic browser (folder tree + item preview +
+  thumbnail grid) standing in for the not-yet-built media pipeline;
+  clicking a swatch renders it in the preview pane exactly as it would
+  appear live (same SlideRenderer/SlideCanvas pipeline as Schedule/
+  Preview/Live), and double-clicking really does add a slide using that
+  color, but there's no actual image/video import yet (see
+  [Roadmap](#roadmap)).
 
 Deliberately absent for now (see [Roadmap](#roadmap)): song/Scripture
-databases, media backgrounds, themes, multi-layer composition, second
-control surfaces (web remote, stage view).
+databases, real media import, themes, multi-layer composition, live
+transcription, second control surfaces (web remote, stage view), and the
+toolbar's Web / Remote / Alerts / Logo actions, which are present as
+disabled stubs so the layout matches the target design but don't claim
+to do anything yet.
 
 ## How it works
 
@@ -71,24 +97,42 @@ surfaces are watching the same model.
 ```
 src/
 ├── main.cpp
-└── core/
-    ├── model/     # Plain data + state: Slide, ScheduleModel.
-    │              # No Qt widgets, no rendering — the single source of
-    │              # truth for "what is the service doing right now."
-    │
-    ├── render/    # Turns model data into pixels: SlideRenderer, and the
-    │              # design-resolution contract (RenderResolution.h).
-    │              # No knowledge of physical windows or screens.
-    │
-    └── ui/        # Qt widgets: OutputWindow, OperatorWindow.
-                   # No slide-drawing logic of its own — only asks
-                   # render/ for pixmaps and displays them.
+├── core/                    # Everything that ISN'T a widget. No <QWidget>
+│   │                        # includes anywhere under core/.
+│   ├── model/               # Plain data + state: Slide, ScheduleModel,
+│   │   │                    # and ScheduleIO (JSON save/load). The
+│   │   │                    # single source of truth for "what is the
+│   │   │                    # service doing right now" — safe to reuse
+│   │   │                    # from a future headless/CLI mode.
+│   │   ├── Slide.h
+│   │   ├── ScheduleModel.h / .cpp
+│   │   └── ScheduleIO.h / .cpp
+│   │
+│   └── render/               # Turns model data into pixels: SlideRenderer,
+│       │                     # and the design-resolution contract
+│       │                     # (RenderResolution.h). No knowledge of
+│       │                     # physical windows or screens.
+│       ├── RenderResolution.h
+│       └── SlideRenderer.h / .cpp
+│
+└── ui/                      # Qt widgets: the operator console and
+    │                        # everything it's built from. No slide-
+    │                        # drawing logic of its own — only asks
+    │                        # core/render for pixmaps and displays them.
+    ├── OperatorWindow.h / .cpp    # the volunteer-facing control surface
+    ├── OutputWindow.h / .cpp      # the congregation-facing output
+    ├── SlideCanvas.h / .cpp       # shared scaled-pixmap display widget
+    ├── MediaLibraryPanel.h / .cpp # the Media tab's folder tree + item preview + grid
+    └── Theme.h / .cpp             # the app-wide dark stylesheet
 ```
 
-Dependency direction is one-way: `ui/` → `render/` → `model/`. Nothing in
-`model/` or `render/` ever includes anything from `ui/`, which is what
-lets a future headless mode, CLI, or alternate front-end reuse the same
-model and renderer without dragging in Qt widget code.
+`ui/` lives as a top-level sibling of `core/`, not nested inside it — the
+UI is a consumer of the core, not a subdirectory of it. Dependency
+direction is one-way: `ui/` → `core/render/` → `core/model/`. Nothing
+under `core/` ever includes anything from `ui/`, which is what lets a
+future headless mode, CLI, or alternate front-end (or a totally different
+UI toolkit) reuse the same model and renderer without dragging in Qt
+widget code.
 
 ## Building
 
@@ -203,8 +247,13 @@ without requiring structural rewrites:
 - [ ] Text styling: font, size, color, outline, per-theme presets
 - [ ] Multi-layer composition (background + text + lower-third)
 - [ ] Song/Scripture lookup and import
+- [ ] Live transcription (speech-to-text feeding the Transcription panel)
 - [ ] Additional control surfaces (web remote, stage/confidence view)
       reading from the same `ScheduleModel`
+- [ ] Wire up the toolbar's Web / Remote / Alerts / Logo actions
+      (currently disabled stubs) once their backing features exist
+
+See `CHANGELOG.md` for what's landed release by release.
 
 ## License
 
