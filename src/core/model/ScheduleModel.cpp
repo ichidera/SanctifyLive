@@ -9,6 +9,7 @@ void ScheduleModel::addSlide(const Slide &slide)
     m_slides.append(slide);
     if (m_currentIndex == -1) {
         m_currentIndex = 0;
+        recordHistory(m_currentIndex);
     }
     emit scheduleChanged();
     emit liveContentChanged();
@@ -36,6 +37,9 @@ void ScheduleModel::setSlides(const QVector<Slide> &slides)
     m_slides = slides;
     m_currentIndex = m_slides.isEmpty() ? -1 : 0;
     m_blackout = false;
+    m_history.clear();
+    if (m_currentIndex == 0)
+        recordHistory(m_currentIndex);
     emit scheduleChanged();
     emit liveContentChanged();
 }
@@ -75,6 +79,7 @@ void ScheduleModel::goToIndex(int index)
         return;
 
     m_currentIndex = index;
+    recordHistory(m_currentIndex);
     emit liveContentChanged();
 }
 
@@ -103,4 +108,17 @@ void ScheduleModel::setBlackout(bool blackout)
 void ScheduleModel::toggleBlackout()
 {
     setBlackout(!m_blackout);
+}
+
+void ScheduleModel::recordHistory(int index)
+{
+    if (index < 0 || index >= m_slides.size())
+        return;
+
+    HistoryEntry entry;
+    entry.slideIndex = index;
+    entry.label = m_slides.at(index).label;
+    entry.timestamp = QDateTime::currentDateTime();
+    m_history.append(entry);
+    emit historyChanged();
 }

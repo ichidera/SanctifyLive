@@ -26,13 +26,19 @@ core so the project stays easy to reason about as features are added.
 
 Current milestone:
 
-- **Operator console layout** — a dark, broadcast-console-style window:
-  a top toolbar (session actions + the live transport), a Preview/Live
-  pane pair, a bottom content strip (Songs / Scriptures / Media /
-  Presentations / Themes tabs), and a Queue panel holding the run order.
-- **Preview vs. Live** — selecting a Queue row stages it in the Preview
+- **Operator console layout** — a dark, broadcast-console-style window,
+  closer to OpenLP's Service Manager / Preview / Live arrangement than a
+  single stacked list: a top toolbar (session actions + the live
+  transport), a main row of **Schedule / Preview / Live** panels side by
+  side, and a bottom content strip (Songs / Scriptures / Media /
+  Presentations / Themes tabs) alongside **History** (a log of what's
+  actually gone live) and **Transcription** (a placeholder for now).
+- **Preview vs. Live** — clicking a Schedule row stages it in the Preview
   pane without touching the congregation-facing output; double-clicking
   it (or using Next/Previous/keyboard shortcuts) commits it live.
+- **History** — an append-only, most-recent-first log of every slide
+  that's actually gone live, timestamped, independent of the Schedule
+  (which is the plan, not the record).
 - **Live control loop** — Next / Previous / Black / Clear, plus keyboard
   shortcuts (arrow keys, space, `B`), all driving a single
   source-of-truth model.
@@ -47,16 +53,20 @@ Current milestone:
 - **Save/Open schedules** — a service's slide queue can be saved to and
   loaded from a `.json` file (`core/model/ScheduleIO`), independent of
   the UI that triggers it.
-- **Media tab** — a cosmetic browser (folder tree + thumbnail grid)
-  standing in for the not-yet-built media pipeline; double-clicking a
-  swatch really does add a slide using that color, but there's no actual
-  image/video import yet (see [Roadmap](#roadmap)).
+- **Media tab** — a cosmetic browser (folder tree + item preview +
+  thumbnail grid) standing in for the not-yet-built media pipeline;
+  clicking a swatch renders it in the preview pane exactly as it would
+  appear live (same SlideRenderer/SlideCanvas pipeline as Schedule/
+  Preview/Live), and double-clicking really does add a slide using that
+  color, but there's no actual image/video import yet (see
+  [Roadmap](#roadmap)).
 
 Deliberately absent for now (see [Roadmap](#roadmap)): song/Scripture
-databases, real media import, themes, multi-layer composition, second
-control surfaces (web remote, stage view), and the toolbar's Web / Remote /
-Alerts / Logo actions, which are present as disabled stubs so the layout
-matches the target design but don't claim to do anything yet.
+databases, real media import, themes, multi-layer composition, live
+transcription, second control surfaces (web remote, stage view), and the
+toolbar's Web / Remote / Alerts / Logo actions, which are present as
+disabled stubs so the layout matches the target design but don't claim
+to do anything yet.
 
 ## How it works
 
@@ -112,7 +122,7 @@ src/
     ├── OperatorWindow.h / .cpp    # the volunteer-facing control surface
     ├── OutputWindow.h / .cpp      # the congregation-facing output
     ├── SlideCanvas.h / .cpp       # shared scaled-pixmap display widget
-    ├── MediaLibraryPanel.h / .cpp # the Media tab's folder tree + grid
+    ├── MediaLibraryPanel.h / .cpp # the Media tab's folder tree + item preview + grid
     └── Theme.h / .cpp             # the app-wide dark stylesheet
 ```
 
@@ -237,6 +247,7 @@ without requiring structural rewrites:
 - [ ] Text styling: font, size, color, outline, per-theme presets
 - [ ] Multi-layer composition (background + text + lower-third)
 - [ ] Song/Scripture lookup and import
+- [ ] Live transcription (speech-to-text feeding the Transcription panel)
 - [ ] Additional control surfaces (web remote, stage/confidence view)
       reading from the same `ScheduleModel`
 - [ ] Wire up the toolbar's Web / Remote / Alerts / Logo actions

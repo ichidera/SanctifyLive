@@ -10,6 +10,11 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include "core/model/Slide.h"
+#include "core/render/RenderResolution.h"
+#include "core/render/SlideRenderer.h"
+#include "ui/SlideCanvas.h"
+
 namespace
 {
 
@@ -51,8 +56,18 @@ public:
 
 signals:
     void activated(const QString &name, const QColor &color);
+    // Emitted on a single click/press so the preview pane can update
+    // without committing anything to the schedule -- mirrors how
+    // clicking a Schedule row stages Preview without going live.
+    void previewRequested(const QString &name, const QColor &color);
 
 protected:
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        QFrame::mousePressEvent(event);
+        emit previewRequested(m_name, m_color);
+    }
+
     void mouseDoubleClickEvent(QMouseEvent *event) override
     {
         QFrame::mouseDoubleClickEvent(event);
@@ -76,6 +91,32 @@ MediaLibraryPanel::MediaLibraryPanel(QWidget *parent) : QWidget(parent)
     buildFolderTree(tree);
     splitter->addWidget(tree);
 
+    // Item-preview pane: deliberately sits between the folder tree and
+    // the thumbnail grid, not off to one side, so it reads as "select on
+    // the left, see it big in the middle, browse more on the right."
+    // Shares the exact rendering pipeline (SlideRenderer + kDesignResolution
+    // + SlideCanvas) that the Schedule/Preview/Live panes use, so this is
+    // a pixel-faithful preview of how the item will actually appear once
+    // it's put on air -- not a separate, possibly-inconsistent mockup.
+    auto *previewWrapper = new QWidget(splitter);
+    auto *previewLayout = new QVBoxLayout(previewWrapper);
+    previewLayout->setContentsMargins(0, 0, 0, 0);
+    previewLayout->setSpacing(6);
+
+    m_previewCanvas = new SlideCanvas(previewWrapper);
+    m_previewCanvas->setMinimumWidth(200);
+
+    m_previewLabel = new QLabel(tr("Select an item to preview"), previewWrapper);
+    m_previewLabel->setObjectName("nextSlideLabel");
+    m_previewLabel->setAlignment(Qt::AlignCenter);
+    m_previewLabel->setWordWrap(true);
+
+    previewLayout->addWidget(m_previewCanvas, /*stretch=*/1);
+    previewLayout->addWidget(m_previewLabel);
+    splitter->addWidget(previewWrapper);
+
+    onTilePreviewRequested(QString(), QColor()); // show an empty canvas until something is picked
+
     auto *scrollArea = new QScrollArea(splitter);
     scrollArea->setWidgetResizable(true);
     scrollArea->setFrameShape(QFrame::NoFrame);
@@ -91,10 +132,28 @@ MediaLibraryPanel::MediaLibraryPanel(QWidget *parent) : QWidget(parent)
 
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1);
+    splitter->setStretchFactor(2, 1);
 
     auto *layout = new QHBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(splitter);
+}
+
+void MediaLibraryPanel::onTilePreviewRequested(const QString &name, const QColor &color)
+{
+    if (!color.isValid()) {
+        m_previewCanvas->setPixmap(SlideRenderer::render(nullptr, kDesignResolution));
+        m_previewLabel->setText(tr("Select an item to preview"));
+        return;
+    }
+
+    // Preview with an empty text body, matching exactly what
+    // onMediaActivated() actually adds to the schedule (a slide with
+    // this color as its background and no text) -- so what's shown here
+    // never diverges from what double-clicking would produce.
+    const Slide previewSlide(name, QString(), color);
+    m_previewCanvas->setPixmap(SlideRenderer::render(&previewSlide, kDesignResolution));
+    m_previewLabel->setText(name);
 }
 
 void MediaLibraryPanel::buildFolderTree(QTreeWidget *tree)
@@ -136,6 +195,7 @@ void MediaLibraryPanel::buildThumbnailGrid(QGridLayout *grid)
     for (const Swatch &swatch : swatches) {
         auto *tile = new MediaTile(tr(swatch.name), QColor(swatch.hex));
         connect(tile, &MediaTile::activated, this, &MediaLibraryPanel::mediaActivated);
+        connect(tile, &MediaTile::previewRequested, this, &MediaLibraryPanel::onTilePreviewRequested);
         grid->addWidget(tile, row, col);
         if (++col >= columns) {
             col = 0;

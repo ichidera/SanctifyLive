@@ -1,5 +1,6 @@
 #include "ui/OperatorWindow.h"
 
+#include <QAbstractItemView>
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
@@ -43,8 +44,8 @@ OperatorWindow::OperatorWindow(QWidget *parent)
     // congregation-facing output, the other is embedded here as the
     // "Live" pane so the operator can see exactly what's live without a
     // second monitor. A third, independent SlideCanvas shows whichever
-    // Queue row is merely *selected* -- see the Preview/Live split in
-    // buildPreviewLiveRow().
+    // Schedule row is merely *selected* -- see the Preview/Live split in
+    // buildMainRow().
     m_outputWindow = new OutputWindow(m_model, nullptr);
     m_livePreview = new OutputWindow(m_model, this);
     m_livePreview->setMinimumHeight(220);
@@ -56,7 +57,7 @@ OperatorWindow::OperatorWindow(QWidget *parent)
     auto *centralLayout = new QVBoxLayout();
     centralLayout->setContentsMargins(12, 12, 12, 12);
     centralLayout->setSpacing(10);
-    centralLayout->addWidget(buildPreviewLiveRow(), /*stretch=*/3);
+    centralLayout->addWidget(buildMainRow(), /*stretch=*/3);
     centralLayout->addWidget(buildTransportRow());
     centralLayout->addWidget(buildLowerArea(), /*stretch=*/4);
 
@@ -74,6 +75,7 @@ OperatorWindow::OperatorWindow(QWidget *parent)
 
     connect(m_model, &ScheduleModel::scheduleChanged, this, &OperatorWindow::onScheduleChanged);
     connect(m_model, &ScheduleModel::liveContentChanged, this, &OperatorWindow::onLiveContentChanged);
+    connect(m_model, &ScheduleModel::historyChanged, this, &OperatorWindow::onHistoryChanged);
 
     // A couple of starter slides so the app isn't empty on first launch.
     m_model->addSlide(Slide(tr("Welcome"), tr("Welcome to the service"), QColor("#1a1a2e")));
@@ -160,7 +162,7 @@ void OperatorWindow::buildMenuBar(QToolBar *toolBar)
     // The main menu bar (File/Edit/Live/Profiles/View/Help) sits above
     // the toolbar -- QMainWindow places menuBar() there automatically.
     // Every entry here is just a second way to reach a command the
-    // toolbar/Queue panel already expose; nothing new is implemented
+    // toolbar/Schedule panel already expose; nothing new is implemented
     // just for the menu.
     QMenuBar *bar = menuBar();
     bar->setObjectName("mainMenuBar");
@@ -242,13 +244,21 @@ QFrame *OperatorWindow::wrapInPanelCard(const QString &title, QWidget *content, 
     return card;
 }
 
-QWidget *OperatorWindow::buildPreviewLiveRow()
+QWidget *OperatorWindow::buildMainRow()
 {
+    // Schedule | Preview | Live, side by side -- the same three-panel
+    // arrangement OpenLP uses for its Service Manager + Preview/Live
+    // slide controllers, rather than tucking the run order away in the
+    // bottom strip. Schedule sits to the left of Preview so the operator
+    // reads left-to-right: "what's coming up" -> "what's staged" ->
+    // "what's actually live."
     auto *splitter = new QSplitter(this);
+    splitter->addWidget(wrapInPanelCard(tr("Schedule"), buildSchedulePanel()));
     splitter->addWidget(wrapInPanelCard(tr("Preview"), m_previewCanvas));
     splitter->addWidget(wrapInPanelCard(tr("Live"), m_livePreview, "liveTitle"));
     splitter->setStretchFactor(0, 1);
     splitter->setStretchFactor(1, 1);
+    splitter->setStretchFactor(2, 1);
     return splitter;
 }
 
@@ -275,9 +285,20 @@ QWidget *OperatorWindow::buildTransportRow()
 
 QWidget *OperatorWindow::buildLowerArea()
 {
+    // Where the Queue panel used to sit (to the right of the content
+    // tabs) now holds two panels stacked vertically: History (an
+    // append-only log of what has actually gone live) and Transcription
+    // (a placeholder -- see buildTranscriptionPanel()). The run order
+    // itself lives in the Schedule panel now, up in the main row.
+    auto *rightSplitter = new QSplitter(Qt::Vertical, this);
+    rightSplitter->addWidget(wrapInPanelCard(tr("History"), buildHistoryPanel()));
+    rightSplitter->addWidget(wrapInPanelCard(tr("Transcription"), buildTranscriptionPanel()));
+    rightSplitter->setStretchFactor(0, 1);
+    rightSplitter->setStretchFactor(1, 1);
+
     auto *splitter = new QSplitter(this);
     splitter->addWidget(buildContentTabs());
-    splitter->addWidget(wrapInPanelCard(tr("Queue"), buildQueuePanel()));
+    splitter->addWidget(rightSplitter);
     splitter->setStretchFactor(0, 2);
     splitter->setStretchFactor(1, 1);
     return splitter;
@@ -300,7 +321,7 @@ QTabWidget *OperatorWindow::buildContentTabs()
 
     auto *tabs = new QTabWidget(this);
     tabs->addTab(makePlaceholder(
-                     tr("No song library yet.\nUse \u201c+ Add Slide\u201d in the Queue panel, "
+                     tr("No song library yet.\nUse \u201c+ Add Slide\u201d in the Schedule panel, "
                         "or double-click a background in the Media tab.")),
                  tr("Songs"));
     tabs->addTab(makePlaceholder(
@@ -320,12 +341,17 @@ QTabWidget *OperatorWindow::buildContentTabs()
     return tabs;
 }
 
-QWidget *OperatorWindow::buildQueuePanel()
+QWidget *OperatorWindow::buildSchedulePanel()
 {
-    m_queueList = new QListWidget(this);
-    m_queueList->setWordWrap(true);
-    connect(m_queueList, &QListWidget::currentRowChanged, this, &OperatorWindow::onQueueItemSelected);
-    connect(m_queueList, &QListWidget::itemActivated, this, &OperatorWindow::onQueueItemActivated);
+    // Single click stages a row in Preview without going live; double-
+    // click (or Next/Previous/keyboard shortcuts) commits it live. This
+    // matches OpenLP's Service Manager, where a single click on a
+    // service item sends it to the Preview slide controller and a
+    // double-click sends it straight to Live.
+    m_scheduleList = new QListWidget(this);
+    m_scheduleList->setWordWrap(true);
+    connect(m_scheduleList, &QListWidget::currentRowChanged, this, &OperatorWindow::onScheduleItemSelected);
+    connect(m_scheduleList, &QListWidget::itemActivated, this, &OperatorWindow::onScheduleItemActivated);
 
     m_addButton = new QPushButton(tr("+ Add Slide"), this);
     m_removeButton = new QPushButton(tr("Remove"), this);
@@ -336,16 +362,57 @@ QWidget *OperatorWindow::buildQueuePanel()
     buttonRow->addWidget(m_addButton);
     buttonRow->addWidget(m_removeButton);
 
-    auto *hint = new QLabel(tr("Double-click (or press Go Live) to put a slide on air."), this);
+    auto *hint = new QLabel(tr("Click to preview, double-click (or press Go Live) to put a slide on air."), this);
     hint->setObjectName("nextSlideLabel");
     hint->setWordWrap(true);
 
     auto *wrapper = new QWidget(this);
     auto *layout = new QVBoxLayout(wrapper);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->addWidget(m_queueList, /*stretch=*/1);
+    layout->addWidget(m_scheduleList, /*stretch=*/1);
     layout->addWidget(hint);
     layout->addLayout(buttonRow);
+    return wrapper;
+}
+
+QWidget *OperatorWindow::buildHistoryPanel()
+{
+    // An append-only, read-only log of what has actually gone live, most
+    // recent first -- distinct from the Schedule list, which is the plan
+    // rather than the record. Nothing here can be clicked to change
+    // what's live; it exists purely so an operator can answer "what did
+    // we just show" without scrolling back through the Schedule.
+    m_historyList = new QListWidget(this);
+    m_historyList->setWordWrap(true);
+    m_historyList->setSelectionMode(QAbstractItemView::NoSelection);
+    m_historyList->setFocusPolicy(Qt::NoFocus);
+    rebuildHistoryList();
+    return m_historyList;
+}
+
+QWidget *OperatorWindow::buildTranscriptionPanel()
+{
+    // Live speech-to-text isn't implemented yet -- there's no audio
+    // capture/transcription pipeline in the project at all (see README
+    // roadmap). This is an honest, disabled stub rather than a mock that
+    // pretends to transcribe, matching how Songs/Scriptures/Presentations/
+    // Themes are handled elsewhere in this window.
+    auto *label = new QLabel(
+        tr("Live transcription isn't implemented yet.\nSee the roadmap in README.md."), this);
+    label->setObjectName("nextSlideLabel");
+    label->setAlignment(Qt::AlignCenter);
+    label->setWordWrap(true);
+
+    auto *startButton = new QPushButton(tr("Start Transcription"), this);
+    startButton->setEnabled(false);
+    startButton->setToolTip(tr("Live transcription isn't implemented yet -- see the roadmap in README.md."));
+
+    auto *wrapper = new QWidget(this);
+    auto *layout = new QVBoxLayout(wrapper);
+    layout->addStretch(1);
+    layout->addWidget(label);
+    layout->addWidget(startButton, 0, Qt::AlignCenter);
+    layout->addStretch(1);
     return wrapper;
 }
 
@@ -361,7 +428,7 @@ void OperatorWindow::onAddSlideClicked()
     if (!ok || text.trimmed().isEmpty())
         return;
 
-    // Use the first line as the queue-list label so the operator can
+    // Use the first line as the schedule-list label so the operator can
     // scan the list without the full text cluttering it.
     const QString label = text.section('\n', 0, 0).left(40);
     m_model->addSlide(Slide(label, text));
@@ -369,30 +436,35 @@ void OperatorWindow::onAddSlideClicked()
 
 void OperatorWindow::onRemoveSlideClicked()
 {
-    const int row = m_queueList->currentRow();
+    const int row = m_scheduleList->currentRow();
     if (row >= 0)
         m_model->removeSlideAt(row);
 }
 
-void OperatorWindow::onQueueItemSelected(int row)
+void OperatorWindow::onScheduleItemSelected(int row)
 {
-    // Selecting a Queue row only updates the Preview pane -- it does
-    // NOT go live. That mirrors the reference layout's Preview/Live
-    // split and matches how broadcast/presentation tools let an
-    // operator stage the next item before cutting to it.
+    // Selecting a Schedule row only updates the Preview pane -- it does
+    // NOT go live. That mirrors OpenLP's Service Manager (single click
+    // -> Preview slide controller) and lets an operator stage the next
+    // item before cutting to it.
     updatePreviewForRow(row);
 }
 
-void OperatorWindow::onQueueItemActivated(QListWidgetItem *item)
+void OperatorWindow::onScheduleItemActivated(QListWidgetItem *item)
 {
-    const int row = m_queueList->row(item);
+    const int row = m_scheduleList->row(item);
     if (row >= 0)
         m_model->goToIndex(row);
 }
 
 void OperatorWindow::onScheduleChanged()
 {
-    rebuildQueueList();
+    rebuildScheduleList();
+}
+
+void OperatorWindow::onHistoryChanged()
+{
+    rebuildHistoryList();
 }
 
 void OperatorWindow::onLiveContentChanged()
@@ -403,8 +475,8 @@ void OperatorWindow::onLiveContentChanged()
     // the live row whenever the live position itself moves, so Preview
     // and Live agree unless the operator has deliberately staged
     // something else.
-    QSignalBlocker blocker(m_queueList);
-    m_queueList->setCurrentRow(m_model->currentIndex());
+    QSignalBlocker blocker(m_scheduleList);
+    m_scheduleList->setCurrentRow(m_model->currentIndex());
     updatePreviewForRow(m_model->currentIndex());
     updateNextSlideLabel();
     if (m_blackButton->isChecked() != m_model->isBlackout()) {
@@ -413,20 +485,35 @@ void OperatorWindow::onLiveContentChanged()
     }
 }
 
-void OperatorWindow::rebuildQueueList()
+void OperatorWindow::rebuildScheduleList()
 {
-    QSignalBlocker blocker(m_queueList);
-    m_queueList->clear();
+    QSignalBlocker blocker(m_scheduleList);
+    m_scheduleList->clear();
     for (int i = 0; i < m_model->count(); ++i) {
         const Slide &slide = m_model->slideAt(i);
         const QString preview = QString("%1\n%2")
                                      .arg(slide.label)
                                      .arg(slide.text.left(60).replace('\n', ' '));
-        m_queueList->addItem(preview);
+        m_scheduleList->addItem(preview);
     }
-    m_queueList->setCurrentRow(m_model->currentIndex());
+    m_scheduleList->setCurrentRow(m_model->currentIndex());
     updateNextSlideLabel();
     updateStatusBar();
+}
+
+void OperatorWindow::rebuildHistoryList()
+{
+    // Most-recent-first so the operator doesn't have to scroll to see
+    // what just went live.
+    m_historyList->clear();
+    const QVector<HistoryEntry> &history = m_model->history();
+    for (int i = history.size() - 1; i >= 0; --i) {
+        const HistoryEntry &entry = history.at(i);
+        const QString row = QString("%1\n%2")
+                                 .arg(entry.timestamp.toString("hh:mm:ss"))
+                                 .arg(entry.label);
+        m_historyList->addItem(row);
+    }
 }
 
 void OperatorWindow::updatePreviewForRow(int row)
@@ -466,7 +553,7 @@ void OperatorWindow::updateStatusBar()
     const QString outputState = m_outputWindow->isVisible()
         ? (screens.size() > 1 ? tr("Output: fullscreen on secondary display") : tr("Output: windowed (single display)"))
         : tr("Output: hidden");
-    m_statusLabel->setText(tr("%1  \u2022  %2 slide(s) in queue").arg(outputState).arg(m_model->count()));
+    m_statusLabel->setText(tr("%1  \u2022  %2 slide(s) in schedule").arg(outputState).arg(m_model->count()));
 }
 
 void OperatorWindow::onToggleOutputWindow(bool checked)
@@ -515,7 +602,7 @@ void OperatorWindow::onNewSchedule()
     if (m_model->count() > 0) {
         const auto answer = QMessageBox::question(
             this, tr("New Schedule"),
-            tr("Discard the current queue and start a new, empty schedule?"));
+            tr("Discard the current schedule and start a new, empty one?"));
         if (answer != QMessageBox::Yes)
             return;
     }
@@ -555,7 +642,7 @@ void OperatorWindow::onMediaActivated(const QString &name, const QColor &color)
 {
     // A modest, real bridge from the (currently cosmetic) Media browser
     // into the live schedule: drop a new slide using this swatch as its
-    // background straight onto the end of the Queue.
+    // background straight onto the end of the Schedule.
     m_model->addSlide(Slide(name, QString(), color));
 }
 
