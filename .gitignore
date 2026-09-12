@@ -1,3 +1,5 @@
 .vs/
 .vscode/
 FIRSTDRAFT/
+build/
+out/
