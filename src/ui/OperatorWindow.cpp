@@ -13,6 +13,8 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QListWidget>
+#include <QMenu>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScreen>
@@ -49,7 +51,7 @@ OperatorWindow::OperatorWindow(QWidget *parent)
     m_previewCanvas = new SlideCanvas(this);
     m_previewCanvas->setMinimumHeight(220);
 
-    buildToolBar();
+    buildMenuBar(buildToolBar());
 
     auto *centralLayout = new QVBoxLayout();
     centralLayout->setContentsMargins(12, 12, 12, 12);
@@ -67,14 +69,7 @@ OperatorWindow::OperatorWindow(QWidget *parent)
     statusBar()->addWidget(m_statusLabel, /*stretch=*/1);
     auto *wakeButton = new QPushButton(tr("Wake Display"), this);
     wakeButton->setToolTip(tr("Bring the output window to the front of the screen it's on."));
-    connect(wakeButton, &QPushButton::clicked, this, [this]() {
-        if (m_outputWindow->isVisible()) {
-            m_outputWindow->raise();
-            m_outputWindow->activateWindow();
-        } else {
-            m_goLiveButton->setChecked(true); // routes through the same toggle logic
-        }
-    });
+    connect(wakeButton, &QPushButton::clicked, this, &OperatorWindow::onWakeDisplayClicked);
     statusBar()->addPermanentWidget(wakeButton);
 
     connect(m_model, &ScheduleModel::scheduleChanged, this, &OperatorWindow::onScheduleChanged);
@@ -101,7 +96,7 @@ OperatorWindow::~OperatorWindow()
 // Layout construction
 // ---------------------------------------------------------------------
 
-void OperatorWindow::buildToolBar()
+QToolBar *OperatorWindow::buildToolBar()
 {
     auto *toolBar = addToolBar(tr("Main"));
     toolBar->setMovable(false);
@@ -117,7 +112,6 @@ void OperatorWindow::buildToolBar()
     connect(toolBar->addAction(tr("New")), &QAction::triggered, this, &OperatorWindow::onNewSchedule);
     connect(toolBar->addAction(tr("Open")), &QAction::triggered, this, &OperatorWindow::onOpenSchedule);
     connect(toolBar->addAction(tr("Save")), &QAction::triggered, this, &OperatorWindow::onSaveSchedule);
-    addStub(tr("Store"), tr("Online media store -- not implemented yet."));
     addStub(tr("Web"), tr("Web publishing -- not implemented yet."));
     addStub(tr("Remote"), tr("Remote control from a phone/tablet -- not implemented yet."));
 
@@ -157,6 +151,78 @@ void OperatorWindow::buildToolBar()
     m_liveIndicator->setObjectName("liveTitle");
     m_liveIndicator->setContentsMargins(8, 0, 4, 0);
     toolBar->addWidget(m_liveIndicator);
+
+    return toolBar;
+}
+
+void OperatorWindow::buildMenuBar(QToolBar *toolBar)
+{
+    // The main menu bar (File/Edit/Live/Profiles/View/Help) sits above
+    // the toolbar -- QMainWindow places menuBar() there automatically.
+    // Every entry here is just a second way to reach a command the
+    // toolbar/Queue panel already expose; nothing new is implemented
+    // just for the menu.
+    QMenuBar *bar = menuBar();
+    bar->setObjectName("mainMenuBar");
+
+    QMenu *fileMenu = bar->addMenu(tr("&File"));
+    connect(fileMenu->addAction(tr("&New Schedule")), &QAction::triggered,
+            this, &OperatorWindow::onNewSchedule);
+    connect(fileMenu->addAction(tr("&Open Schedule\u2026")), &QAction::triggered,
+            this, &OperatorWindow::onOpenSchedule);
+    connect(fileMenu->addAction(tr("&Save Schedule\u2026")), &QAction::triggered,
+            this, &OperatorWindow::onSaveSchedule);
+    fileMenu->addSeparator();
+    connect(fileMenu->addAction(tr("E&xit")), &QAction::triggered, this, &QWidget::close);
+
+    QMenu *editMenu = bar->addMenu(tr("&Edit"));
+    connect(editMenu->addAction(tr("&Add Slide\u2026")), &QAction::triggered,
+            this, &OperatorWindow::onAddSlideClicked);
+    connect(editMenu->addAction(tr("&Remove Selected Slide")), &QAction::triggered,
+            this, &OperatorWindow::onRemoveSlideClicked);
+
+    QMenu *liveMenu = bar->addMenu(tr("&Live"));
+    QAction *goLiveAction = liveMenu->addAction(tr("&Go Live"));
+    goLiveAction->setCheckable(true);
+    // Two-way sync so the menu checkmark and the toolbar button never
+    // disagree about whether output is live, regardless of which one
+    // the operator actually clicks.
+    connect(goLiveAction, &QAction::toggled, m_goLiveButton, &QPushButton::setChecked);
+    connect(m_goLiveButton, &QPushButton::toggled, goLiveAction, &QAction::setChecked);
+
+    QAction *blackAction = liveMenu->addAction(tr("&Black"));
+    blackAction->setCheckable(true);
+    connect(blackAction, &QAction::toggled, m_blackButton, &QToolButton::setChecked);
+    connect(m_blackButton, &QToolButton::toggled, blackAction, &QAction::setChecked);
+
+    connect(liveMenu->addAction(tr("&Clear")), &QAction::triggered,
+            this, &OperatorWindow::onClearClicked);
+    liveMenu->addSeparator();
+    connect(liveMenu->addAction(tr("Ne&xt")), &QAction::triggered, m_model, &ScheduleModel::advance);
+    connect(liveMenu->addAction(tr("Pre&vious")), &QAction::triggered, m_model, &ScheduleModel::retreat);
+
+    // Profiles (per-venue/per-service settings presets) has no backing
+    // feature yet -- see README roadmap -- so this menu is a labeled,
+    // disabled placeholder rather than something that pretends to work.
+    QMenu *profilesMenu = bar->addMenu(tr("&Profiles"));
+    QAction *manageProfiles = profilesMenu->addAction(tr("&Manage Profiles\u2026"));
+    manageProfiles->setEnabled(false);
+    manageProfiles->setToolTip(tr("Profiles aren't implemented yet -- see the roadmap in README.md."));
+
+    QMenu *viewMenu = bar->addMenu(tr("&View"));
+    connect(viewMenu->addAction(tr("&Wake Display")), &QAction::triggered,
+            this, &OperatorWindow::onWakeDisplayClicked);
+    QAction *toggleToolbar = viewMenu->addAction(tr("Show &Toolbar"));
+    toggleToolbar->setCheckable(true);
+    toggleToolbar->setChecked(true);
+    connect(toggleToolbar, &QAction::toggled, toolBar, &QToolBar::setVisible);
+
+    QMenu *helpMenu = bar->addMenu(tr("&Help"));
+    connect(helpMenu->addAction(tr("&About SanctifyLive")), &QAction::triggered, this, [this]() {
+        QMessageBox::about(this, tr("About SanctifyLive"),
+                            tr("SanctifyLive\n\nA church presentation program.\n"
+                               "See README.md for features and the roadmap."));
+    });
 }
 
 QFrame *OperatorWindow::wrapInPanelCard(const QString &title, QWidget *content, const char *titleObjectName)
@@ -427,6 +493,16 @@ void OperatorWindow::onToggleOutputWindow(bool checked)
     }
     updateLiveIndicator();
     updateStatusBar();
+}
+
+void OperatorWindow::onWakeDisplayClicked()
+{
+    if (m_outputWindow->isVisible()) {
+        m_outputWindow->raise();
+        m_outputWindow->activateWindow();
+    } else {
+        m_goLiveButton->setChecked(true); // routes through the same toggle logic
+    }
 }
 
 void OperatorWindow::onClearClicked()

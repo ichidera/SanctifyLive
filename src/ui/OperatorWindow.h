@@ -10,6 +10,7 @@ class QToolButton;
 class QLabel;
 class QTabWidget;
 class QFrame;
+class QToolBar;
 class ScheduleModel;
 class OutputWindow;
 class SlideCanvas;
@@ -53,13 +54,15 @@ private slots:
     void onScheduleChanged();
     void onToggleOutputWindow(bool checked);
     void onClearClicked();
+    void onWakeDisplayClicked();
     void onNewSchedule();
     void onOpenSchedule();
     void onSaveSchedule();
     void onMediaActivated(const QString &name, const QColor &color);
 
 private:
-    void buildToolBar();
+    QToolBar *buildToolBar();
+    void buildMenuBar(QToolBar *toolBar);
     QWidget *buildPreviewLiveRow();
     QWidget *buildTransportRow();
     QWidget *buildLowerArea();

@@ -54,9 +54,9 @@ Current milestone:
 
 Deliberately absent for now (see [Roadmap](#roadmap)): song/Scripture
 databases, real media import, themes, multi-layer composition, second
-control surfaces (web remote, stage view), and the toolbar's Store / Web /
-Remote / Alerts / Logo actions, which are present as disabled stubs so the
-layout matches the target design but don't claim to do anything yet.
+control surfaces (web remote, stage view), and the toolbar's Web / Remote /
+Alerts / Logo actions, which are present as disabled stubs so the layout
+matches the target design but don't claim to do anything yet.
 
 ## How it works
 
@@ -239,7 +239,7 @@ without requiring structural rewrites:
 - [ ] Song/Scripture lookup and import
 - [ ] Additional control surfaces (web remote, stage/confidence view)
       reading from the same `ScheduleModel`
-- [ ] Wire up the toolbar's Store / Web / Remote / Alerts / Logo actions
+- [ ] Wire up the toolbar's Web / Remote / Alerts / Logo actions
       (currently disabled stubs) once their backing features exist
 
 See `CHANGELOG.md` for what's landed release by release.
