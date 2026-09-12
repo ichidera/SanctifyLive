@@ -1,13 +1,3 @@
-build/
-out/
 .vs/
 .vscode/
-*.user
-SanctifyLive.zip
-docs/
-*.log
-.git/
-.gradle/
-.idea/
-local.properties
-resources/
+FIRSTDRAFT/
