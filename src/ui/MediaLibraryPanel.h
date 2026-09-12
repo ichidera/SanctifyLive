@@ -7,7 +7,7 @@ class QTreeWidget;
 class QGridLayout;
 
 // MediaLibraryPanel is the "Media" tab: a folder tree on the left
-// (Videos / Images / Feeds / DVD / Time / Audio / Collections) and a
+// (currently just Videos and Images) and a
 // thumbnail grid on the right, matching the reference layout.
 //
 // There is no real media pipeline yet (see README roadmap: "Background

@@ -99,9 +99,15 @@ MediaLibraryPanel::MediaLibraryPanel(QWidget *parent) : QWidget(parent)
 
 void MediaLibraryPanel::buildFolderTree(QTreeWidget *tree)
 {
+    // Feeds/DVD/Time/Audio/Collections removed for now -- there's no
+    // backing feature for any of them yet (no live feed ingestion, no
+    // disc playback, no countdown timers, no audio playback, no saved
+    // collections), so listing them would just be decoration pretending
+    // to be functionality. Videos stays as a visible placeholder folder
+    // (no video import yet either, but it's the very next roadmap item
+    // media-wise) and Images is the one folder with real content.
     const QStringList folders = {
-        tr("Videos"), tr("Images"), tr("Feeds"), tr("DVD"),
-        tr("Time"), tr("Audio"), tr("Collections"),
+        tr("Videos"), tr("Images"),
     };
     QTreeWidgetItem *imagesItem = nullptr;
     for (const QString &folder : folders) {
