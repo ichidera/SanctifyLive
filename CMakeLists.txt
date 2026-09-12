@@ -17,6 +17,9 @@ add_executable(SanctifyLive
     src/core/Slide.h
     src/core/ScheduleModel.h
     src/core/ScheduleModel.cpp
+    src/core/RenderResolution.h
+    src/core/SlideRenderer.h
+    src/core/SlideRenderer.cpp
     src/core/OutputWindow.h
     src/core/OutputWindow.cpp
     src/core/OperatorWindow.h

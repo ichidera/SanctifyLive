@@ -93,7 +93,25 @@ def matches_gitignore(rel_path: str, patterns) -> bool:
     return matched
 
 
-def make_zip(root: Path, out: Path, force: bool = False, exclude_dirs=None) -> None:
+def parse_root_ignores(ignore_list: Iterable[str]) -> set:
+    """Normalize an iterable of root-relative ignore paths into a set of posix paths.
+
+    Examples accepted: 'docs', 'docs/', '/docs', 'path/to/file.txt'
+    Returned paths never start or end with '/'.
+    """
+    out = set()
+    for s in (ignore_list or []):
+        if not s:
+            continue
+        p = s.replace('\\', '/').strip()
+        p = p.lstrip('/')
+        p = p.rstrip('/')
+        if p:
+            out.add(p)
+    return out
+
+
+def make_zip(root: Path, out: Path, force: bool = False, exclude_dirs=None, root_ignores=None) -> None:
     out = out.resolve()
     if out.exists():
         if force:
@@ -107,6 +125,7 @@ def make_zip(root: Path, out: Path, force: bool = False, exclude_dirs=None) -> N
             sys.exit(1)
 
     exclude_dirs = set(exclude_dirs or [])
+    root_ignores = parse_root_ignores(root_ignores)
 
     gitignore_patterns = load_gitignore(root)
 
@@ -127,9 +146,17 @@ def make_zip(root: Path, out: Path, force: bool = False, exclude_dirs=None) -> N
             except Exception:
                 rel = p.name
 
+
             # skip by simple exclude_dirs (top-level directory names)
             if any(rel == d or rel.startswith(d + '/') for d in exclude_dirs):
                 continue
+
+            # skip by explicit root-relative ignores (files or directories)
+            try:
+                if any(rel == r or rel.startswith(r + '/') for r in root_ignores):
+                    continue
+            except Exception:
+                pass
 
             # respect .gitignore patterns
             try:
@@ -170,6 +197,8 @@ def parse_args() -> argparse.Namespace:
                    help="Overwrite existing zip if present (default: always overwrite)")
     p.add_argument("--exclude", "-e", default=".vs,.git,build,bin,__pycache__",
                    help="Comma-separated directory names to exclude (default: .vs,.git,build,bin,__pycache__)")
+    p.add_argument("--ignore-root", "-i", default="docs/",
+                   help="Comma-separated root-relative paths to ignore (default: docs/)")
     return p.parse_args()
 
 
@@ -180,8 +209,9 @@ def main() -> None:
 
     out = args.output.resolve() if args.output else (repo_root / "SanctifyLive.zip").resolve()
     exclude_dirs = [d for d in (s.strip() for s in args.exclude.split(',')) if d]
+    root_ignores = [d for d in (s.strip() for s in args.ignore_root.split(',')) if d]
 
-    make_zip(repo_root, out, force=args.force, exclude_dirs=exclude_dirs)
+    make_zip(repo_root, out, force=args.force, exclude_dirs=exclude_dirs, root_ignores=root_ignores)
 
 
 if __name__ == '__main__':

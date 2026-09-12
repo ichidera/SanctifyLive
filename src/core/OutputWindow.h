@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QPixmap>
 #include <QWidget>
 
 class ScheduleModel;
@@ -11,6 +12,18 @@ class ScheduleModel;
 // lets future control surfaces (web remote, stage view) drive the same
 // output without this class needing to know they exist.
 //
+// RESOLUTION INDEPENDENCE: this class never renders content itself. It
+// asks SlideRenderer for a QPixmap at kDesignResolution (see
+// RenderResolution.h) and caches it in m_canvas -- that render only
+// happens when the live content actually changes. paintEvent's only job
+// is to scale that one cached pixmap into whatever physical rect() this
+// widget currently has, letterboxing if the aspect ratio doesn't match.
+// This is also why the SAME class works both as the real projector
+// output and as OperatorWindow's small embedded live preview: both are
+// just different physical rect()s scaling the same bytes. See
+// SlideRenderer.h and the module-level design note for the full
+// rationale.
+//
 // NOTE on architecture: this is a plain QWidget with a paintEvent for
 // milestone one, which is enough to prove the control loop end-to-end.
 // Once media/video layers are introduced, this should become a
@@ -18,7 +31,9 @@ class ScheduleModel;
 // GPU-accelerated and can run its own render loop independent of the
 // operator UI thread -- see the "Core render & output pipeline" step
 // in the build plan. Swapping that in later shouldn't require changes
-// outside this file, since everything else only talks to ScheduleModel.
+// outside this file, since everything else only talks to ScheduleModel,
+// and the design-resolution/scale-to-physical contract is unaffected by
+// what draws the canvas.
 class OutputWindow : public QWidget
 {
     Q_OBJECT
@@ -34,4 +49,10 @@ private slots:
 
 private:
     ScheduleModel *m_model;
+
+    // The current frame, pre-rendered at kDesignResolution. paintEvent
+    // only ever scales this -- it never draws a Slide's content
+    // directly. Re-rendered exactly once per liveContentChanged signal,
+    // never on resize.
+    QPixmap m_canvas;
 };
