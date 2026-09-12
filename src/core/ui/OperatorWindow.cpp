@@ -1,4 +1,4 @@
-#include "OperatorWindow.h"
+#include "core/ui/OperatorWindow.h"
 
 #include <QApplication>
 #include <QCloseEvent>
@@ -15,8 +15,8 @@
 #include <QScreen>
 #include <QSplitter>
 
-#include "OutputWindow.h"
-#include "ScheduleModel.h"
+#include "core/model/ScheduleModel.h"
+#include "core/ui/OutputWindow.h"
 
 OperatorWindow::OperatorWindow(QWidget *parent)
     : QMainWindow(parent), m_model(new ScheduleModel(this))

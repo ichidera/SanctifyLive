@@ -1,4 +1,4 @@
-#include "ScheduleModel.h"
+#include "core/model/ScheduleModel.h"
 
 ScheduleModel::ScheduleModel(QObject *parent) : QObject(parent)
 {

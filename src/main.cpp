@@ -1,6 +1,6 @@
 #include <QApplication>
 
-#include "core/OperatorWindow.h"
+#include "core/ui/OperatorWindow.h"
 
 int main(int argc, char *argv[])
 {

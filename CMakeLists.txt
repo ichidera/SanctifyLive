@@ -12,18 +12,28 @@ set(CMAKE_AUTOUIC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
+# src/core is split into niches by responsibility, not just alphabetically:
+#   model/  - plain data + state (Slide, ScheduleModel). No Qt widgets,
+#             no rendering. Safe to reuse from a future headless/CLI mode.
+#   render/ - turns model data into pixels (SlideRenderer, the design-
+#             resolution contract). No knowledge of physical windows.
+#   ui/     - Qt widgets that display things and take input
+#             (OutputWindow, OperatorWindow). No slide-drawing logic of
+#             its own -- it only asks render/ for pixmaps.
+# Dependency direction is one-way: ui/ -> render/ -> model/. Nothing in
+# model/ or render/ ever includes anything from ui/.
 add_executable(SanctifyLive
     src/main.cpp
-    src/core/Slide.h
-    src/core/ScheduleModel.h
-    src/core/ScheduleModel.cpp
-    src/core/RenderResolution.h
-    src/core/SlideRenderer.h
-    src/core/SlideRenderer.cpp
-    src/core/OutputWindow.h
-    src/core/OutputWindow.cpp
-    src/core/OperatorWindow.h
-    src/core/OperatorWindow.cpp
+    src/core/model/Slide.h
+    src/core/model/ScheduleModel.h
+    src/core/model/ScheduleModel.cpp
+    src/core/render/RenderResolution.h
+    src/core/render/SlideRenderer.h
+    src/core/render/SlideRenderer.cpp
+    src/core/ui/OutputWindow.h
+    src/core/ui/OutputWindow.cpp
+    src/core/ui/OperatorWindow.h
+    src/core/ui/OperatorWindow.cpp
 )
 
 target_include_directories(SanctifyLive PRIVATE src)

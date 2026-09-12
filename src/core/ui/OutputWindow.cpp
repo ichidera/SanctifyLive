@@ -1,11 +1,11 @@
-#include "OutputWindow.h"
+#include "core/ui/OutputWindow.h"
 
 #include <QPainter>
 #include <QPaintEvent>
 
-#include "RenderResolution.h"
-#include "ScheduleModel.h"
-#include "SlideRenderer.h"
+#include "core/model/ScheduleModel.h"
+#include "core/render/RenderResolution.h"
+#include "core/render/SlideRenderer.h"
 
 OutputWindow::OutputWindow(ScheduleModel *model, QWidget *parent)
     : QWidget(parent), m_model(model)

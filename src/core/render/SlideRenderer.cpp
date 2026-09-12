@@ -1,8 +1,8 @@
-#include "SlideRenderer.h"
+#include "core/render/SlideRenderer.h"
 
 #include <QPainter>
 
-#include "Slide.h"
+#include "core/model/Slide.h"
 
 namespace SlideRenderer
 {

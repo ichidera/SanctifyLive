@@ -3,7 +3,7 @@
 #include <QObject>
 #include <QVector>
 
-#include "Slide.h"
+#include "core/model/Slide.h"
 
 // ScheduleModel is the single source of truth for "what is the service
 // doing right now." Both the OperatorWindow (control surface) and the
