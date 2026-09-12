@@ -1,4 +1,4 @@
-#include "core/ui/OutputWindow.h"
+#include "ui/OutputWindow.h"
 
 #include <QPainter>
 #include <QPaintEvent>

@@ -31,6 +31,15 @@ void ScheduleModel::removeSlideAt(int index)
     emit liveContentChanged();
 }
 
+void ScheduleModel::setSlides(const QVector<Slide> &slides)
+{
+    m_slides = slides;
+    m_currentIndex = m_slides.isEmpty() ? -1 : 0;
+    m_blackout = false;
+    emit scheduleChanged();
+    emit liveContentChanged();
+}
+
 int ScheduleModel::count() const
 {
     return m_slides.size();

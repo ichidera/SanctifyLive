@@ -36,6 +36,16 @@ public:
     const Slide *currentSlide() const;
     const Slide *nextSlide() const;
 
+    // Read-only access to the full slide list, e.g. for serialization
+    // (see ScheduleIO) or for UI panels that need to browse everything
+    // rather than just the live/next pair.
+    const QVector<Slide> &slides() const { return m_slides; }
+
+    // Wholesale replace of the schedule contents (e.g. after loading a
+    // saved schedule from disk via ScheduleIO). Resets live position to
+    // the first slide and clears blackout, same as starting fresh.
+    void setSlides(const QVector<Slide> &slides);
+
 public slots:
     void goToIndex(int index);
     void advance();   // move to next slide (no-op if already at the end)
