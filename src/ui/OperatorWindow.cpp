@@ -285,21 +285,27 @@ QWidget *OperatorWindow::buildTransportRow()
 
 QWidget *OperatorWindow::buildLowerArea()
 {
-    // Right-hand column, stacked top-to-bottom: ITEM PREVIEW, HISTORY,
-    // TRANSCRIPTION. Item Preview lives here -- next to History -- and
-    // deliberately NOT wedged inside the Media tab (see MediaLibraryPanel's
-    // own glossary note): it previews whatever's selected across Content
-    // Tabs in general, not just Media, so it doesn't belong to any one
-    // tab. This is a different "preview" than the Main Row's Preview
-    // panel: that one stages the next *service* item; this one previews
-    // *library content* before it's even added to Schedule.
+    // Right-hand column: HISTORY and ITEM PREVIEW sit side by side in a
+    // horizontal row (Item Preview to History's right), with
+    // TRANSCRIPTION stacked below that row. Item Preview lives here --
+    // right next to History -- and deliberately NOT wedged inside the
+    // Media tab (see MediaLibraryPanel's own glossary note): it previews
+    // whatever's selected across Content Tabs in general, not just
+    // Media, so it doesn't belong to any one tab. This is a different
+    // "preview" than the Main Row's Preview panel: that one stages the
+    // next *service* item; this one previews *library content* before
+    // it's even added to Schedule.
+    auto *historyPreviewRow = new QSplitter(Qt::Horizontal, this);
+    historyPreviewRow->addWidget(wrapInPanelCard(tr("History"), buildHistoryPanel()));
+    historyPreviewRow->addWidget(wrapInPanelCard(tr("Item Preview"), buildItemPreviewPanel()));
+    historyPreviewRow->setStretchFactor(0, 1);
+    historyPreviewRow->setStretchFactor(1, 1);
+
     auto *rightSplitter = new QSplitter(Qt::Vertical, this);
-    rightSplitter->addWidget(wrapInPanelCard(tr("Item Preview"), buildItemPreviewPanel()));
-    rightSplitter->addWidget(wrapInPanelCard(tr("History"), buildHistoryPanel()));
+    rightSplitter->addWidget(historyPreviewRow);
     rightSplitter->addWidget(wrapInPanelCard(tr("Transcription"), buildTranscriptionPanel()));
     rightSplitter->setStretchFactor(0, 2);
     rightSplitter->setStretchFactor(1, 1);
-    rightSplitter->setStretchFactor(2, 1);
 
     auto *splitter = new QSplitter(this);
     splitter->addWidget(buildContentTabs());
