@@ -56,10 +56,10 @@ class MediaLibraryPanel;
 //                     between the Main Row and the Lower Area. Built by
 //                     buildTransportRow().
 //
-//   LOWER AREA        Everything below the Transport Row: Content Tabs
-//                     on the left, History + Item Preview side by side
-//                     on the right, Transcription below that row. Built
-//                     by buildLowerArea().
+//   LOWER AREA        Everything below the Transport Row, three columns
+//                     left to right: Content Tabs, Item Preview, and a
+//                     History-over-Transcription column. Built by
+//                     buildLowerArea().
 //     CONTENT TABS      The Songs/Scriptures/Media/Presentations/Themes
 //                       tab strip -- where the operator browses source
 //                       material to add to Schedule. Built by
@@ -67,27 +67,27 @@ class MediaLibraryPanel;
 //                       internals (folder tree + thumbnail grid) are
 //                       MediaLibraryPanel's job, not this class's --
 //                       see that header's own glossary note.
-//     HISTORY           Read-only, append-only, most-recent-first log
-//                       of every slide that has actually gone live,
-//                       timestamped. Distinct from Schedule (the plan)
-//                       -- this is the record. List widget:
-//                       m_historyList. Built by buildHistoryPanel().
-//     ITEM PREVIEW      Sits immediately to HISTORY's right, in the
-//                       same horizontal row. Shows a pixel-faithful
-//                       render of whatever's currently selected/hovered
-//                       in Content Tabs (Media today; Songs/
-//                       Presentations/Themes once they're real) --
-//                       BEFORE it's added to Schedule. Deliberately NOT
-//                       squeezed inside the Media tab itself. Canvas:
-//                       m_itemPreviewCanvas. This is a LIBRARY-CONTENT
-//                       preview, NOT the same thing as the Main Row's
-//                       Preview panel (which previews the service run
-//                       order).
-//     TRANSCRIPTION     Below the History/Item Preview row, spanning
-//                       the full width of this column. Placeholder
-//                       stub -- no audio/speech-to-text pipeline exists
-//                       yet (see README roadmap). Built by
-//                       buildTranscriptionPanel().
+//     ITEM PREVIEW      The middle column -- sits in the gap between
+//                       Content Tabs and History, not wedged inside any
+//                       one Content Tab (see MediaLibraryPanel's own
+//                       glossary note). Shows a pixel-faithful render
+//                       of whatever's currently selected/hovered in
+//                       Content Tabs (Media today; Songs/Presentations/
+//                       Themes once they're real) -- BEFORE it's added
+//                       to Schedule. Canvas: m_itemPreviewCanvas. This
+//                       is a LIBRARY-CONTENT preview, NOT the same
+//                       thing as the Main Row's Preview panel (which
+//                       previews the service run order).
+//     HISTORY           Rightmost column, top half. Read-only, append-
+//                       only, most-recent-first log of every slide that
+//                       has actually gone live, timestamped. Distinct
+//                       from Schedule (the plan) -- this is the record.
+//                       List widget: m_historyList. Built by
+//                       buildHistoryPanel().
+//     TRANSCRIPTION     Rightmost column, bottom half, below History.
+//                       Placeholder stub -- no audio/speech-to-text
+//                       pipeline exists yet (see README roadmap). Built
+//                       by buildTranscriptionPanel().
 //
 //   STATUS BAR        Bottom-of-window strip: output state + slide
 //                     count on the left, "Wake Display" button on the

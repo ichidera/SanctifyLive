@@ -285,33 +285,34 @@ QWidget *OperatorWindow::buildTransportRow()
 
 QWidget *OperatorWindow::buildLowerArea()
 {
-    // Right-hand column: HISTORY and ITEM PREVIEW sit side by side in a
-    // horizontal row (Item Preview to History's right), with
-    // TRANSCRIPTION stacked below that row. Item Preview lives here --
-    // right next to History -- and deliberately NOT wedged inside the
-    // Media tab (see MediaLibraryPanel's own glossary note): it previews
+    // Three columns, left to right: CONTENT TABS, then ITEM PREVIEW
+    // sitting in the gap between Content Tabs and HISTORY (with
+    // TRANSCRIPTION stacked below History). Item Preview belongs in
+    // that gap -- not wedged inside the Media tab itself (see
+    // MediaLibraryPanel's own glossary note), since it previews
     // whatever's selected across Content Tabs in general, not just
-    // Media, so it doesn't belong to any one tab. This is a different
-    // "preview" than the Main Row's Preview panel: that one stages the
-    // next *service* item; this one previews *library content* before
-    // it's even added to Schedule.
-    auto *historyPreviewRow = new QSplitter(Qt::Horizontal, this);
-    historyPreviewRow->addWidget(wrapInPanelCard(tr("History"), buildHistoryPanel()));
-    historyPreviewRow->addWidget(wrapInPanelCard(tr("Item Preview"), buildItemPreviewPanel()));
-    historyPreviewRow->setStretchFactor(0, 1);
-    historyPreviewRow->setStretchFactor(1, 1);
-
-    auto *rightSplitter = new QSplitter(Qt::Vertical, this);
-    rightSplitter->addWidget(historyPreviewRow);
-    rightSplitter->addWidget(wrapInPanelCard(tr("Transcription"), buildTranscriptionPanel()));
-    rightSplitter->setStretchFactor(0, 2);
-    rightSplitter->setStretchFactor(1, 1);
+    // Media. This is a different "preview" than the Main Row's Preview
+    // panel above: that one stages the next *service* item; this one
+    // previews *library content* before it's even added to Schedule.
+    auto *historyColumn = new QSplitter(Qt::Vertical, this);
+    historyColumn->addWidget(wrapInPanelCard(tr("History"), buildHistoryPanel()));
+    historyColumn->addWidget(wrapInPanelCard(tr("Transcription"), buildTranscriptionPanel()));
+    historyColumn->setStretchFactor(0, 1);
+    historyColumn->setStretchFactor(1, 1);
+    // QSplitter only *honors* stretch factors on subsequent resizes; the
+    // very first layout pass splits space roughly evenly regardless,
+    // which can under-allocate a panel below its content's natural
+    // height. Setting explicit initial sizes (History gets a bit more,
+    // Transcription gets enough for its label + button) avoids that.
+    historyColumn->setSizes({220, 160});
 
     auto *splitter = new QSplitter(this);
     splitter->addWidget(buildContentTabs());
-    splitter->addWidget(rightSplitter);
-    splitter->setStretchFactor(0, 2);
+    splitter->addWidget(wrapInPanelCard(tr("Item Preview"), buildItemPreviewPanel()));
+    splitter->addWidget(historyColumn);
+    splitter->setStretchFactor(0, 3);
     splitter->setStretchFactor(1, 1);
+    splitter->setStretchFactor(2, 2);
     return splitter;
 }
 
@@ -440,14 +441,23 @@ QWidget *OperatorWindow::buildTranscriptionPanel()
     label->setObjectName("nextSlideLabel");
     label->setAlignment(Qt::AlignCenter);
     label->setWordWrap(true);
+    // Top-aligned with a fixed top margin rather than vertically centered
+    // via stretches on both sides: centering stretches can squeeze a
+    // wrapping label below its natural height when this column ends up
+    // narrow (three columns now share the Lower Area -- see
+    // buildLowerArea()), which made the two lines overlap instead of
+    // stacking. A fixed minimum height keeps that from happening even if
+    // the splitter briefly under-allocates space on first layout.
+    label->setMinimumHeight(48);
 
     auto *startButton = new QPushButton(tr("Start Transcription"), this);
     startButton->setEnabled(false);
     startButton->setToolTip(tr("Live transcription isn't implemented yet -- see the roadmap in README.md."));
 
     auto *wrapper = new QWidget(this);
+    wrapper->setMinimumHeight(110);
     auto *layout = new QVBoxLayout(wrapper);
-    layout->addStretch(1);
+    layout->addSpacing(12);
     layout->addWidget(label);
     layout->addWidget(startButton, 0, Qt::AlignCenter);
     layout->addStretch(1);
