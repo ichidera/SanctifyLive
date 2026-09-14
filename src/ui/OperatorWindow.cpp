@@ -285,16 +285,21 @@ QWidget *OperatorWindow::buildTransportRow()
 
 QWidget *OperatorWindow::buildLowerArea()
 {
-    // Where the Queue panel used to sit (to the right of the content
-    // tabs) now holds two panels stacked vertically: History (an
-    // append-only log of what has actually gone live) and Transcription
-    // (a placeholder -- see buildTranscriptionPanel()). The run order
-    // itself lives in the Schedule panel now, up in the main row.
+    // Right-hand column, stacked top-to-bottom: ITEM PREVIEW, HISTORY,
+    // TRANSCRIPTION. Item Preview lives here -- next to History -- and
+    // deliberately NOT wedged inside the Media tab (see MediaLibraryPanel's
+    // own glossary note): it previews whatever's selected across Content
+    // Tabs in general, not just Media, so it doesn't belong to any one
+    // tab. This is a different "preview" than the Main Row's Preview
+    // panel: that one stages the next *service* item; this one previews
+    // *library content* before it's even added to Schedule.
     auto *rightSplitter = new QSplitter(Qt::Vertical, this);
+    rightSplitter->addWidget(wrapInPanelCard(tr("Item Preview"), buildItemPreviewPanel()));
     rightSplitter->addWidget(wrapInPanelCard(tr("History"), buildHistoryPanel()));
     rightSplitter->addWidget(wrapInPanelCard(tr("Transcription"), buildTranscriptionPanel()));
-    rightSplitter->setStretchFactor(0, 1);
+    rightSplitter->setStretchFactor(0, 2);
     rightSplitter->setStretchFactor(1, 1);
+    rightSplitter->setStretchFactor(2, 1);
 
     auto *splitter = new QSplitter(this);
     splitter->addWidget(buildContentTabs());
@@ -330,6 +335,7 @@ QTabWidget *OperatorWindow::buildContentTabs()
 
     m_mediaPanel = new MediaLibraryPanel(this);
     connect(m_mediaPanel, &MediaLibraryPanel::mediaActivated, this, &OperatorWindow::onMediaActivated);
+    connect(m_mediaPanel, &MediaLibraryPanel::previewRequested, this, &OperatorWindow::onMediaPreviewRequested);
     tabs->addTab(m_mediaPanel, tr("Media"));
 
     tabs->addTab(makePlaceholder(tr("Presentations aren't implemented yet.\nSee the roadmap in README.md.")),
@@ -372,6 +378,32 @@ QWidget *OperatorWindow::buildSchedulePanel()
     layout->addWidget(m_scheduleList, /*stretch=*/1);
     layout->addWidget(hint);
     layout->addLayout(buttonRow);
+    return wrapper;
+}
+
+QWidget *OperatorWindow::buildItemPreviewPanel()
+{
+    // Shows a pixel-faithful render of whatever's currently
+    // selected/hovered in Content Tabs (Media today; Songs/
+    // Presentations/Themes once they're real), using the exact same
+    // SlideRenderer/SlideCanvas pipeline as Schedule/Preview/Live, so
+    // what's shown here never diverges from what actually appears once
+    // it's added to Schedule and put on air.
+    m_itemPreviewCanvas = new SlideCanvas(this);
+    m_itemPreviewCanvas->setMinimumHeight(120);
+    m_itemPreviewCanvas->setPixmap(SlideRenderer::render(nullptr, kDesignResolution));
+
+    m_itemPreviewLabel = new QLabel(tr("Select an item to preview"), this);
+    m_itemPreviewLabel->setObjectName("nextSlideLabel");
+    m_itemPreviewLabel->setAlignment(Qt::AlignCenter);
+    m_itemPreviewLabel->setWordWrap(true);
+
+    auto *wrapper = new QWidget(this);
+    auto *layout = new QVBoxLayout(wrapper);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(6);
+    layout->addWidget(m_itemPreviewCanvas, /*stretch=*/1);
+    layout->addWidget(m_itemPreviewLabel);
     return wrapper;
 }
 
@@ -644,6 +676,16 @@ void OperatorWindow::onMediaActivated(const QString &name, const QColor &color)
     // into the live schedule: drop a new slide using this swatch as its
     // background straight onto the end of the Schedule.
     m_model->addSlide(Slide(name, QString(), color));
+}
+
+void OperatorWindow::onMediaPreviewRequested(const QString &name, const QColor &color)
+{
+    // Renders exactly what onMediaActivated() would actually add (same
+    // empty-text-body + swatch-background Slide), so the Item Preview
+    // panel is never a lie about what double-clicking would produce.
+    const Slide previewSlide(name, QString(), color);
+    m_itemPreviewCanvas->setPixmap(SlideRenderer::render(&previewSlide, kDesignResolution));
+    m_itemPreviewLabel->setText(name);
 }
 
 // ---------------------------------------------------------------------

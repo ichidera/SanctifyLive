@@ -6,11 +6,20 @@
 class ScheduleModel;
 
 // OutputWindow is what actually gets projected/displayed to the
-// congregation. It observes a ScheduleModel and repaints whenever the
-// live content changes -- it never receives direct commands from the
-// operator UI. Keeping this one-directional (model -> output) is what
-// lets future control surfaces (web remote, stage view) drive the same
-// output without this class needing to know they exist.
+// congregation -- the OUTPUT WINDOW in OperatorWindow's panel glossary
+// (see OperatorWindow.h). It observes a ScheduleModel and repaints
+// whenever the live content changes -- it never receives direct
+// commands from the operator UI. Keeping this one-directional (model ->
+// output) is what lets future control surfaces (web remote, stage view)
+// drive the same output without this class needing to know they exist.
+//
+// Two instances of this class exist at runtime, both watching the same
+// ScheduleModel so they can never disagree: OperatorWindow's
+// m_outputWindow (the real, possibly-fullscreen congregation-facing
+// window) and m_livePreview (an embedded instance that IS the LIVE
+// panel in the Main Row). This class has no idea which role it's
+// playing in a given instance -- that distinction lives entirely in how
+// OperatorWindow shows/positions each one.
 //
 // RESOLUTION INDEPENDENCE: this class never renders content itself. It
 // asks SlideRenderer for a QPixmap at kDesignResolution (see

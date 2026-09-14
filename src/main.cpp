@@ -1,15 +1,14 @@
 #include <QApplication>
 
-#include "core/ui/OperatorWindow.h"
-#include "core/ui/Theme.h"
+#include "ui/OperatorWindow.h"
+#include "ui/Theme.h"
 
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
     QApplication::setApplicationName("SanctifyLive");
     QApplication::setOrganizationName("SanctifyLive");
-
-    Theme::applyDark(app);
+    app.setStyleSheet(Theme::stylesheet());
 
     OperatorWindow operatorWindow;
     operatorWindow.show();

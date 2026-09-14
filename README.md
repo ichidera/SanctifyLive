@@ -11,6 +11,7 @@ core so the project stays easy to reason about as features are added.
 ## Contents
 
 - [Features](#features)
+- [Panel glossary](#panel-glossary)
 - [How it works](#how-it-works)
 - [Project layout](#project-layout)
 - [Building](#building)
@@ -53,13 +54,16 @@ Current milestone:
 - **Save/Open schedules** — a service's slide queue can be saved to and
   loaded from a `.json` file (`core/model/ScheduleIO`), independent of
   the UI that triggers it.
-- **Media tab** — a cosmetic browser (folder tree + item preview +
-  thumbnail grid) standing in for the not-yet-built media pipeline;
-  clicking a swatch renders it in the preview pane exactly as it would
-  appear live (same SlideRenderer/SlideCanvas pipeline as Schedule/
-  Preview/Live), and double-clicking really does add a slide using that
-  color, but there's no actual image/video import yet (see
-  [Roadmap](#roadmap)).
+- **Item Preview** — a pixel-faithful render of whatever's currently
+  selected/hovered in the content tabs (Media today; more tabs later),
+  *before* it's added to the Schedule. Lives next to History, not
+  inside any one content tab, since it's meant to serve all of them.
+- **Media tab** — a cosmetic browser (folder tree + thumbnail grid)
+  standing in for the not-yet-built media pipeline; clicking a swatch
+  renders it in the Item Preview panel exactly as it would appear live
+  (same SlideRenderer/SlideCanvas pipeline as Schedule/Preview/Live),
+  and double-clicking really does add a slide using that color, but
+  there's no actual image/video import yet (see [Roadmap](#roadmap)).
 
 Deliberately absent for now (see [Roadmap](#roadmap)): song/Scripture
 databases, real media import, themes, multi-layer composition, live
@@ -67,6 +71,35 @@ transcription, second control surfaces (web remote, stage view), and the
 toolbar's Web / Remote / Alerts / Logo actions, which are present as
 disabled stubs so the layout matches the target design but don't claim
 to do anything yet.
+
+## Panel glossary
+
+Every named box in the operator window has exactly one canonical name,
+used consistently in code, comments, and issue/PR discussion. The full,
+authoritative version of this glossary lives as a doc comment at the top
+of `src/ui/OperatorWindow.h` — treat this table as a quick-reference
+summary, and that header as the source of truth if the two ever drift.
+
+| Name | What it is | Code |
+| --- | --- | --- |
+| **Toolbar** | Top bar: New/Open/Save, Web/Remote (stubs), Go Live, Alerts/Logo (stubs), Black, Clear, the LIVE/Offline indicator. | `OperatorWindow::buildToolBar()` |
+| **Menu Bar** | File/Edit/Live/Profiles/View/Help — every entry duplicates a Toolbar/panel action. | `OperatorWindow::buildMenuBar()` |
+| **Schedule** | The run order for the service (OpenLP calls its equivalent the "Service Manager"). Single click stages Preview; double-click/Next/Previous commits Live. | `OperatorWindow::buildSchedulePanel()`, `m_scheduleList` |
+| **Preview** | Whichever Schedule row is currently *selected* — staged, not yet live. A *service* preview. | `m_previewCanvas` |
+| **Live** | Mirrors the model's actual live position at all times, in-app — independent of whether the real Output Window is showing it. | `m_livePreview` (an embedded `OutputWindow`) |
+| **Transport Row** | Previous / Next buttons + the "Next: ..." label. | `OperatorWindow::buildTransportRow()` |
+| **Content Tabs** | Songs/Scriptures/Media/Presentations/Themes — where the operator browses source material to add to Schedule. | `OperatorWindow::buildContentTabs()` |
+| **Media panel** | The Media tab's own contents: a folder tree + thumbnail grid. | `MediaLibraryPanel` |
+| **Item Preview** | Pixel-faithful render of whatever's selected/hovered in Content Tabs, *before* it's added to Schedule. A *library-content* preview — not the same thing as Preview above. | `OperatorWindow::buildItemPreviewPanel()`, `m_itemPreviewCanvas` |
+| **History** | Read-only, append-only, most-recent-first log of every slide that's actually gone live, timestamped. | `OperatorWindow::buildHistoryPanel()`, `m_historyList`, `ScheduleModel::history()` |
+| **Transcription** | Placeholder stub — no speech-to-text pipeline exists yet. | `OperatorWindow::buildTranscriptionPanel()` |
+| **Status Bar** | Bottom strip: output state + slide count, and the "Wake Display" button. | Built inline in `OperatorWindow`'s constructor |
+| **Output Window** | The actual, possibly-fullscreen, congregation-facing display (what a projector shows). | `OutputWindow`, `m_outputWindow` |
+
+Two names are deliberately similar and worth double-checking before
+using either one: **Preview** (Main Row, stages the next *service* item)
+vs. **Item Preview** (Lower Area, previews *library content* before it's
+even added to the Schedule).
 
 ## How it works
 
@@ -122,7 +155,7 @@ src/
     ├── OperatorWindow.h / .cpp    # the volunteer-facing control surface
     ├── OutputWindow.h / .cpp      # the congregation-facing output
     ├── SlideCanvas.h / .cpp       # shared scaled-pixmap display widget
-    ├── MediaLibraryPanel.h / .cpp # the Media tab's folder tree + item preview + grid
+    ├── MediaLibraryPanel.h / .cpp # the Media tab's folder tree + grid
     └── Theme.h / .cpp             # the app-wide dark stylesheet
 ```
 
