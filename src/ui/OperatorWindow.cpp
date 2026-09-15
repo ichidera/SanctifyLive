@@ -10,7 +10,6 @@
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
-#include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QListWidget>
@@ -76,10 +75,6 @@ OperatorWindow::OperatorWindow(QWidget *parent)
     connect(m_model, &ScheduleModel::scheduleChanged, this, &OperatorWindow::onScheduleChanged);
     connect(m_model, &ScheduleModel::liveContentChanged, this, &OperatorWindow::onLiveContentChanged);
     connect(m_model, &ScheduleModel::historyChanged, this, &OperatorWindow::onHistoryChanged);
-
-    // A couple of starter slides so the app isn't empty on first launch.
-    m_model->addSlide(Slide(tr("Welcome"), tr("Welcome to the service"), QColor("#1a1a2e")));
-    m_model->addSlide(Slide(tr("Announcement"), tr("Coffee & fellowship after the service"), QColor("#16213e")));
 
     updateLiveIndicator();
     updateStatusBar();
@@ -177,12 +172,6 @@ void OperatorWindow::buildMenuBar(QToolBar *toolBar)
     fileMenu->addSeparator();
     connect(fileMenu->addAction(tr("E&xit")), &QAction::triggered, this, &QWidget::close);
 
-    QMenu *editMenu = bar->addMenu(tr("&Edit"));
-    connect(editMenu->addAction(tr("&Add Slide\u2026")), &QAction::triggered,
-            this, &OperatorWindow::onAddSlideClicked);
-    connect(editMenu->addAction(tr("&Remove Selected Slide")), &QAction::triggered,
-            this, &OperatorWindow::onRemoveSlideClicked);
-
     QMenu *liveMenu = bar->addMenu(tr("&Live"));
     QAction *goLiveAction = liveMenu->addAction(tr("&Go Live"));
     goLiveAction->setCheckable(true);
@@ -199,9 +188,6 @@ void OperatorWindow::buildMenuBar(QToolBar *toolBar)
 
     connect(liveMenu->addAction(tr("&Clear")), &QAction::triggered,
             this, &OperatorWindow::onClearClicked);
-    liveMenu->addSeparator();
-    connect(liveMenu->addAction(tr("Ne&xt")), &QAction::triggered, m_model, &ScheduleModel::advance);
-    connect(liveMenu->addAction(tr("Pre&vious")), &QAction::triggered, m_model, &ScheduleModel::retreat);
 
     // Profiles (per-venue/per-service settings presets) has no backing
     // feature yet -- see README roadmap -- so this menu is a labeled,
@@ -264,11 +250,11 @@ QWidget *OperatorWindow::buildMainRow()
 
 QWidget *OperatorWindow::buildTransportRow()
 {
-    m_prevButton = new QPushButton(tr("\u2039\u2039 Previous"), this);
-    m_nextButton = new QPushButton(tr("Next \u203A\u203A"), this);
-    connect(m_prevButton, &QPushButton::clicked, m_model, &ScheduleModel::retreat);
-    connect(m_nextButton, &QPushButton::clicked, m_model, &ScheduleModel::advance);
-
+    // Previous/Next buttons were removed -- advancing/retreating still
+    // works via double-clicking a Schedule row or the keyboard shortcuts
+    // (arrow keys/space/B; see keyPressEvent()), it just isn't a
+    // standalone button pair anymore. What's left here is purely
+    // informational: a heads-up on what's coming next.
     m_nextSlideLabel = new QLabel(tr("Next: -"), this);
     m_nextSlideLabel->setObjectName("nextSlideLabel");
     m_nextSlideLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -276,8 +262,6 @@ QWidget *OperatorWindow::buildTransportRow()
     auto *row = new QWidget(this);
     auto *layout = new QHBoxLayout(row);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->addWidget(m_prevButton);
-    layout->addWidget(m_nextButton);
     layout->addStretch(1);
     layout->addWidget(m_nextSlideLabel);
     return row;
@@ -339,8 +323,8 @@ QTabWidget *OperatorWindow::buildContentTabs()
 
     auto *tabs = new QTabWidget(this);
     tabs->addTab(makePlaceholder(
-                     tr("No song library yet.\nUse \u201c+ Add Slide\u201d in the Schedule panel, "
-                        "or double-click a background in the Media tab.")),
+                     tr("No song library yet.\nSee the roadmap in README.md, or "
+                        "double-click a background in the Media tab to try Schedule.")),
                  tr("Songs"));
     tabs->addTab(makePlaceholder(
                      tr("Scripture lookup isn't implemented yet.\nSee the roadmap in README.md.")),
@@ -362,24 +346,23 @@ QTabWidget *OperatorWindow::buildContentTabs()
 
 QWidget *OperatorWindow::buildSchedulePanel()
 {
-    // Single click stages a row in Preview without going live; double-
-    // click (or Next/Previous/keyboard shortcuts) commits it live. This
+    // Single click stages a row in Preview without going live;
+    // double-click (or keyboard shortcuts) commits it live. This
     // matches OpenLP's Service Manager, where a single click on a
     // service item sends it to the Preview slide controller and a
     // double-click sends it straight to Live.
+    //
+    // There's no manual "type a slide's text in" flow anymore -- real
+    // schedule items are meant to come from picking real content
+    // (Songs/Scriptures/Media/Presentations), not free-typed text, so a
+    // freeform Add/Remove pair here would model a workflow the app
+    // isn't actually going to have. Schedule starts empty; it fills up
+    // as those content tabs grow real add-to-schedule actions (Media's
+    // mediaActivated() already works this way -- see onMediaActivated()).
     m_scheduleList = new QListWidget(this);
     m_scheduleList->setWordWrap(true);
     connect(m_scheduleList, &QListWidget::currentRowChanged, this, &OperatorWindow::onScheduleItemSelected);
     connect(m_scheduleList, &QListWidget::itemActivated, this, &OperatorWindow::onScheduleItemActivated);
-
-    m_addButton = new QPushButton(tr("+ Add Slide"), this);
-    m_removeButton = new QPushButton(tr("Remove"), this);
-    connect(m_addButton, &QPushButton::clicked, this, &OperatorWindow::onAddSlideClicked);
-    connect(m_removeButton, &QPushButton::clicked, this, &OperatorWindow::onRemoveSlideClicked);
-
-    auto *buttonRow = new QHBoxLayout();
-    buttonRow->addWidget(m_addButton);
-    buttonRow->addWidget(m_removeButton);
 
     auto *hint = new QLabel(tr("Click to preview, double-click (or press Go Live) to put a slide on air."), this);
     hint->setObjectName("nextSlideLabel");
@@ -390,7 +373,6 @@ QWidget *OperatorWindow::buildSchedulePanel()
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(m_scheduleList, /*stretch=*/1);
     layout->addWidget(hint);
-    layout->addLayout(buttonRow);
     return wrapper;
 }
 
@@ -477,27 +459,6 @@ QWidget *OperatorWindow::buildTranscriptionPanel()
 // ---------------------------------------------------------------------
 // Slots
 // ---------------------------------------------------------------------
-
-void OperatorWindow::onAddSlideClicked()
-{
-    bool ok = false;
-    const QString text = QInputDialog::getMultiLineText(
-        this, tr("Add Slide"), tr("Slide text:"), QString(), &ok);
-    if (!ok || text.trimmed().isEmpty())
-        return;
-
-    // Use the first line as the schedule-list label so the operator can
-    // scan the list without the full text cluttering it.
-    const QString label = text.section('\n', 0, 0).left(40);
-    m_model->addSlide(Slide(label, text));
-}
-
-void OperatorWindow::onRemoveSlideClicked()
-{
-    const int row = m_scheduleList->currentRow();
-    if (row >= 0)
-        m_model->removeSlideAt(row);
-}
 
 void OperatorWindow::onScheduleItemSelected(int row)
 {

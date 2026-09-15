@@ -36,13 +36,18 @@ Current milestone:
   actually gone live) and **Transcription** (a placeholder for now).
 - **Preview vs. Live** — clicking a Schedule row stages it in the Preview
   pane without touching the congregation-facing output; double-clicking
-  it (or using Next/Previous/keyboard shortcuts) commits it live.
+  it (or using keyboard shortcuts) commits it live. Schedule starts
+  empty and has no manual "type a slide" entry point on purpose — real
+  items are meant to come from picking actual content (Media today;
+  Songs/Scriptures/Presentations once they exist), not free-typed text.
 - **History** — an append-only, most-recent-first log of every slide
   that's actually gone live, timestamped, independent of the Schedule
   (which is the plan, not the record).
-- **Live control loop** — Next / Previous / Black / Clear, plus keyboard
-  shortcuts (arrow keys, space, `B`), all driving a single
-  source-of-truth model.
+- **Live control loop** — Black / Clear, plus keyboard shortcuts (arrow
+  keys, space to advance/retreat, `B` for black), all driving a single
+  source-of-truth model. There's no dedicated Previous/Next button pair
+  in the UI anymore; the "Next: ..." readout under the Main Row is
+  informational only.
 - **Two-window output** — a real output window (send it to a projector,
   full-screen) and an in-app live preview, both fed by the same model so
   they never disagree about what's live.
@@ -58,12 +63,28 @@ Current milestone:
   selected/hovered in the content tabs (Media today; more tabs later),
   *before* it's added to the Schedule. Lives next to History, not
   inside any one content tab, since it's meant to serve all of them.
-- **Media tab** — a cosmetic browser (folder tree + thumbnail grid)
-  standing in for the not-yet-built media pipeline; clicking a swatch
-  renders it in the Item Preview panel exactly as it would appear live
-  (same SlideRenderer/SlideCanvas pipeline as Schedule/Preview/Live),
-  and double-clicking really does add a slide using that color, but
-  there's no actual image/video import yet (see [Roadmap](#roadmap)).
+- **Media tab** — Videos and Images are genuinely separate collections
+  (own grid, own item count, own **+** import filter, switched via the
+  folder tree), not one grid pretending to be two. Images ships six
+  built-in solid-color swatches standing in for a real library; clicking
+  one renders it in the Item Preview panel exactly as it would appear
+  live (same SlideRenderer/SlideCanvas pipeline as Schedule/Preview/
+  Live), and double-clicking really does add a slide using that color.
+  The bottom bar's **+** button goes straight to a file picker — no
+  "what kind of file?" menu, since the selected folder already answers
+  that — filtered to real image extensions on Images, real video
+  extensions on Videos. Imported images show a real thumbnail of the
+  actual file (browsing is real); since `Slide` can't carry an image
+  background yet (see [Roadmap](#roadmap)), putting one live still falls
+  back to a placeholder color, and the tile's tooltip says so rather
+  than pretending. Imported videos are cataloged (real file, real name)
+  but not interactive — no thumbnail (no decoder wired in), and
+  clicking/double-clicking does nothing, since there's no honest "this
+  is what it'll look like live" answer to give for video yet; that's
+  planned to need real VLC/FFmpeg-level work down the line. Settings and
+  View are honest disabled stubs, same pattern as Transcription/
+  Profiles. The item count reflects whichever folder is currently
+  showing, read live off its grid, never hardcoded.
 
 Deliberately absent for now (see [Roadmap](#roadmap)): song/Scripture
 databases, real media import, themes, multi-layer composition, live
@@ -83,13 +104,13 @@ summary, and that header as the source of truth if the two ever drift.
 | Name | What it is | Code |
 | --- | --- | --- |
 | **Toolbar** | Top bar: New/Open/Save, Web/Remote (stubs), Go Live, Alerts/Logo (stubs), Black, Clear, the LIVE/Offline indicator. | `OperatorWindow::buildToolBar()` |
-| **Menu Bar** | File/Edit/Live/Profiles/View/Help — every entry duplicates a Toolbar/panel action. | `OperatorWindow::buildMenuBar()` |
-| **Schedule** | The run order for the service (OpenLP calls its equivalent the "Service Manager"). Single click stages Preview; double-click/Next/Previous commits Live. | `OperatorWindow::buildSchedulePanel()`, `m_scheduleList` |
+| **Menu Bar** | File/Live/Profiles/View/Help — every entry duplicates a Toolbar/panel action. | `OperatorWindow::buildMenuBar()` |
+| **Schedule** | The run order for the service (OpenLP calls its equivalent the "Service Manager"). Single click stages Preview; double-click/keyboard shortcuts commit Live. Starts empty — no manual "type a slide" entry point. | `OperatorWindow::buildSchedulePanel()`, `m_scheduleList` |
 | **Preview** | Whichever Schedule row is currently *selected* — staged, not yet live. A *service* preview. | `m_previewCanvas` |
 | **Live** | Mirrors the model's actual live position at all times, in-app — independent of whether the real Output Window is showing it. | `m_livePreview` (an embedded `OutputWindow`) |
-| **Transport Row** | Previous / Next buttons + the "Next: ..." label. | `OperatorWindow::buildTransportRow()` |
+| **Transport Row** | Just the "Next: ..." readout now — informational only, no button pair. | `OperatorWindow::buildTransportRow()` |
 | **Content Tabs** | Songs/Scriptures/Media/Presentations/Themes — where the operator browses source material to add to Schedule. | `OperatorWindow::buildContentTabs()` |
-| **Media panel** | The Media tab's own contents: a folder tree + thumbnail grid. | `MediaLibraryPanel` |
+| **Media panel** | The Media tab's own contents: folder tree + separate Images/Videos grids + bottom bar (add/settings/count/view). | `MediaLibraryPanel` |
 | **Item Preview** | Pixel-faithful render of whatever's selected/hovered in Content Tabs, *before* it's added to Schedule. A *library-content* preview — not the same thing as Preview above. | `OperatorWindow::buildItemPreviewPanel()`, `m_itemPreviewCanvas` |
 | **History** | Read-only, append-only, most-recent-first log of every slide that's actually gone live, timestamped. | `OperatorWindow::buildHistoryPanel()`, `m_historyList`, `ScheduleModel::history()` |
 | **Transcription** | Placeholder stub — no speech-to-text pipeline exists yet. | `OperatorWindow::buildTranscriptionPanel()` |
@@ -155,7 +176,7 @@ src/
     ├── OperatorWindow.h / .cpp    # the volunteer-facing control surface
     ├── OutputWindow.h / .cpp      # the congregation-facing output
     ├── SlideCanvas.h / .cpp       # shared scaled-pixmap display widget
-    ├── MediaLibraryPanel.h / .cpp # the Media tab's folder tree + grid
+    ├── MediaLibraryPanel.h / .cpp # the Media tab: folder tree + Images/Videos grids
     └── Theme.h / .cpp             # the app-wide dark stylesheet
 ```
 
@@ -277,6 +298,8 @@ without requiring structural rewrites:
 - [ ] Group slides into higher-level schedule items (a whole song, a whole
       reading) instead of a flat slide list
 - [ ] Background media (image/video) per slide
+- [ ] Real video decode/thumbnail/playback (VLC/FFmpeg-level work) for
+      the Videos folder in the Media tab
 - [ ] Text styling: font, size, color, outline, per-theme presets
 - [ ] Multi-layer composition (background + text + lower-third)
 - [ ] Song/Scripture lookup and import

@@ -28,7 +28,7 @@ class MediaLibraryPanel;
 //   TOOLBAR           Top bar: New/Open/Save, Web/Remote (stubs),
 //                     Go Live, Alerts/Logo (stubs), Black, Clear, the
 //                     LIVE/Offline indicator. Built by buildToolBar().
-//   MENU BAR          File/Edit/Live/Profiles/View/Help. Every entry
+//   MENU BAR          File/Live/Profiles/View/Help. Every entry
 //                     duplicates a Toolbar/panel action -- nothing is
 //                     menu-only. Built by buildMenuBar().
 //
@@ -37,7 +37,10 @@ class MediaLibraryPanel;
 //     SCHEDULE          The run order for the service (OpenLP calls its
 //                       equivalent the "Service Manager"). A single
 //                       click stages a row in Preview; double-click (or
-//                       Next/Previous/keyboard) commits it Live. List
+//                       keyboard shortcuts) commits it Live. Starts
+//                       empty -- there's no manual "type a slide" flow;
+//                       items arrive by picking real content elsewhere
+//                       (e.g. double-clicking a Media tile). List
 //                       widget: m_scheduleList. Built by
 //                       buildSchedulePanel().
 //     PREVIEW           Shows whichever Schedule row is currently
@@ -52,8 +55,12 @@ class MediaLibraryPanel;
 //                       doc comment below. Canvas: m_livePreview (an
 //                       embedded OutputWindow instance).
 //
-//   TRANSPORT ROW     Previous / Next buttons + the "Next: ..." label,
-//                     between the Main Row and the Lower Area. Built by
+//   TRANSPORT ROW     Just the "Next: ..." label now -- purely
+//                     informational. Advancing/retreating happens via a
+//                     Schedule double-click or keyboard shortcuts
+//                     (arrow keys/space/B; see keyPressEvent()), not a
+//                     dedicated Previous/Next button pair. Between the
+//                     Main Row and the Lower Area. Built by
 //                     buildTransportRow().
 //
 //   LOWER AREA        Everything below the Transport Row, three columns
@@ -112,8 +119,8 @@ class MediaLibraryPanel;
 // that lives in this class (deliberately NOT in ScheduleModel) is which
 // Schedule row is currently *previewed*. This mirrors OpenLP's Service
 // Manager behavior: a single click on a Schedule row only stages it in
-// Preview; a double-click (or Next/Previous/keyboard shortcuts) commits
-// it live. The in-app Live panel always mirrors the model's live position
+// Preview; a double-click (or keyboard shortcuts) commits it live. The
+// in-app Live panel always mirrors the model's live position
 // regardless of whether the real Output Window is on screen -- "Go Live"
 // only controls whether that live content is actually being sent to the
 // congregation-facing display, not whether the model's live position
@@ -136,8 +143,6 @@ protected:
     void closeEvent(QCloseEvent *event) override;
 
 private slots:
-    void onAddSlideClicked();
-    void onRemoveSlideClicked();
     void onScheduleItemSelected(int row);
     void onScheduleItemActivated(QListWidgetItem *item);
     void onLiveContentChanged();
@@ -185,10 +190,6 @@ private:
     QLabel *m_liveIndicator;
     QLabel *m_statusLabel;
 
-    QPushButton *m_addButton;
-    QPushButton *m_removeButton;
-    QPushButton *m_prevButton;
-    QPushButton *m_nextButton;
     QToolButton *m_blackButton;
     QToolButton *m_clearButton;
     QPushButton *m_goLiveButton;
