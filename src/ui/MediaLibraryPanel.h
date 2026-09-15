@@ -29,25 +29,24 @@ class QStackedWidget;
 // structurally apart from day one instead of papering over the
 // difference with a shared grid.
 //
-// There is no real media pipeline yet (see README roadmap: "Background
-// media (image/video) per slide" is still unbuilt -- Slide only has a
-// solid QColor background, no image/video path), so Images ships a
-// small built-in set of solid-color swatches rather than pretending to
-// browse a real file library, and Videos starts empty. What IS real:
+// Images ships a small built-in set of solid-color swatches (no
+// backing file, no real library) alongside genuinely imported photos,
+// and Videos starts empty. What IS real:
 //   - A single click on an interactive tile fires previewRequested() so
 //     OperatorWindow can render it in the Item Preview panel;
 //     double-clicking asks the operator window to add a new slide using
-//     that color as its background, via mediaActivated().
-//   - The bottom bar's "+" button genuinely opens a file picker -- filtered
+//     it as its background, via mediaActivated().
+//   - The bottom bar's "+" button goes straight to a file picker -- filtered
 //     to real image extensions when Images is selected, real video
-//     extensions when Videos is selected, straight to the picker, no
-//     "what kind of file?" menu in between since the current folder
-//     already answers that.
-//   - Imported images get an actual thumbnail of the real file (not a
-//     placeholder swatch) -- browsing is real. Because Slide can't carry
-//     an image background yet, activating/previewing an imported image
-//     tile still falls back to a neutral placeholder color rather than
-//     pretending the real photo would appear live; its tooltip says so.
+//     extensions when Videos is selected, no "what kind of file?" menu
+//     in between since the current folder already answers that.
+//   - Imported images carry their real file path end to end: the
+//     thumbnail shown while browsing, the Item Preview render, and (if
+//     activated) the live Slide's background are all the same actual
+//     photo via Slide::backgroundImagePath, not a color approximation.
+//     The built-in swatches have no file behind them, so they still use
+//     a plain QColor background -- same Slide, same SlideRenderer path,
+//     just no image path set.
 //   - Imported videos are cataloged (real file, real name) but not
 //     interactive yet -- no thumbnail (no decoder wired in), and
 //     clicking/double-clicking does nothing, since there's no honest
@@ -64,16 +63,18 @@ public:
 signals:
     // Emitted when the operator double-clicks an interactive media tile.
     // `name` is shown to the user (e.g. as the new slide's label);
-    // `color` is the swatch color to use as that slide's background.
-    void mediaActivated(const QString &name, const QColor &color);
+    // `color` is the fallback/behind-image background color; `imagePath`
+    // is the real imported file's path, or empty for a built-in swatch
+    // (in which case `color` is the actual background, not a fallback).
+    void mediaActivated(const QString &name, const QColor &color, const QString &imagePath);
 
     // Emitted on a single click/press of an interactive tile, before any
-    // double-click has a chance to register. `name`/`color` describe the
-    // same swatch as above; OperatorWindow uses this to update its Item
+    // double-click has a chance to register. Same parameters as
+    // mediaActivated(); OperatorWindow uses this to update its Item
     // Preview panel without anything being added to the Schedule -- the
     // Media-tab equivalent of how selecting (not activating) a Schedule
     // row only updates Preview.
-    void previewRequested(const QString &name, const QColor &color);
+    void previewRequested(const QString &name, const QColor &color, const QString &imagePath);
 
 private:
     // One folder's worth of state: its own page (so QStackedWidget can
@@ -94,7 +95,7 @@ private:
     QWidget *buildBottomBar();
 
     void addTile(MediaFolder &folder, const QString &name, const QColor &color,
-                 const QString &thumbnailPath, bool interactive);
+                 const QString &imagePath, bool interactive);
     void onTreeSelectionChanged(QTreeWidgetItem *current);
     void onAddButtonClicked();
     void refreshItemCount();

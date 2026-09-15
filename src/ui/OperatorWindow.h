@@ -154,8 +154,8 @@ private slots:
     void onNewSchedule();
     void onOpenSchedule();
     void onSaveSchedule();
-    void onMediaActivated(const QString &name, const QColor &color);
-    void onMediaPreviewRequested(const QString &name, const QColor &color);
+    void onMediaActivated(const QString &name, const QColor &color, const QString &imagePath);
+    void onMediaPreviewRequested(const QString &name, const QColor &color, const QString &imagePath);
 
 private:
     QToolBar *buildToolBar();

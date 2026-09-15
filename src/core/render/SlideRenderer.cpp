@@ -1,6 +1,7 @@
 #include "core/render/SlideRenderer.h"
 
 #include <QPainter>
+#include <QPixmap>
 
 #include "core/model/Slide.h"
 
@@ -23,7 +24,25 @@ QPixmap render(const Slide *slide, const QSize &resolution)
         return canvas;
     }
 
-    canvas.fill(slide->background);
+    // Real background image, cover-fit (scaled up to fully cover the
+    // frame, then center-cropped) so it fills the canvas the same way a
+    // photo background would in any slide/presentation tool -- never
+    // letterboxed, never stretched out of proportion. Falls back to the
+    // solid `background` color if the path is empty or the file can't
+    // be decoded, rather than showing a blank/broken frame.
+    QPixmap background;
+    if (!slide->backgroundImagePath.isEmpty())
+        background = QPixmap(slide->backgroundImagePath);
+
+    if (!background.isNull()) {
+        const QPixmap scaled = background.scaled(resolution, Qt::KeepAspectRatioByExpanding,
+                                                   Qt::SmoothTransformation);
+        const int srcX = (scaled.width() - resolution.width()) / 2;
+        const int srcY = (scaled.height() - resolution.height()) / 2;
+        painter.drawPixmap(0, 0, scaled, srcX, srcY, resolution.width(), resolution.height());
+    } else {
+        canvas.fill(slide->background);
+    }
 
     if (slide->text.isEmpty())
         return canvas;

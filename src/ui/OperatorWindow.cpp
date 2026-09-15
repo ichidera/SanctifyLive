@@ -657,20 +657,22 @@ void OperatorWindow::onSaveSchedule()
     }
 }
 
-void OperatorWindow::onMediaActivated(const QString &name, const QColor &color)
+void OperatorWindow::onMediaActivated(const QString &name, const QColor &color, const QString &imagePath)
 {
-    // A modest, real bridge from the (currently cosmetic) Media browser
-    // into the live schedule: drop a new slide using this swatch as its
-    // background straight onto the end of the Schedule.
-    m_model->addSlide(Slide(name, QString(), color));
+    // A modest, real bridge from the Media browser into the live
+    // schedule: drop a new slide using this tile's real image (when
+    // imported) or its swatch color (when built-in) straight onto the
+    // end of the Schedule.
+    m_model->addSlide(Slide(name, QString(), color, imagePath));
 }
 
-void OperatorWindow::onMediaPreviewRequested(const QString &name, const QColor &color)
+void OperatorWindow::onMediaPreviewRequested(const QString &name, const QColor &color, const QString &imagePath)
 {
     // Renders exactly what onMediaActivated() would actually add (same
-    // empty-text-body + swatch-background Slide), so the Item Preview
-    // panel is never a lie about what double-clicking would produce.
-    const Slide previewSlide(name, QString(), color);
+    // Slide construction), so the Item Preview panel is never a lie
+    // about what double-clicking would produce -- an imported photo
+    // shows as the real photo here, not an approximated color.
+    const Slide previewSlide(name, QString(), color, imagePath);
     m_itemPreviewCanvas->setPixmap(SlideRenderer::render(&previewSlide, kDesignResolution));
     m_itemPreviewLabel->setText(name);
 }

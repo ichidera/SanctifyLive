@@ -73,11 +73,11 @@ Current milestone:
   The bottom bar's **+** button goes straight to a file picker — no
   "what kind of file?" menu, since the selected folder already answers
   that — filtered to real image extensions on Images, real video
-  extensions on Videos. Imported images show a real thumbnail of the
-  actual file (browsing is real); since `Slide` can't carry an image
-  background yet (see [Roadmap](#roadmap)), putting one live still falls
-  back to a placeholder color, and the tile's tooltip says so rather
-  than pretending. Imported videos are cataloged (real file, real name)
+  extensions on Videos. Imported images carry their real file path
+  end to end (`Slide::backgroundImagePath`): the thumbnail shown while
+  browsing, the Item Preview render, and a live slide (if activated) are
+  all the same actual photo, cover-fit by `SlideRenderer` — not a color
+  approximation. Imported videos are cataloged (real file, real name)
   but not interactive — no thumbnail (no decoder wired in), and
   clicking/double-clicking does nothing, since there's no honest "this
   is what it'll look like live" answer to give for video yet; that's
@@ -297,7 +297,8 @@ without requiring structural rewrites:
 
 - [ ] Group slides into higher-level schedule items (a whole song, a whole
       reading) instead of a flat slide list
-- [ ] Background media (image/video) per slide
+- [x] Image backgrounds per slide (`Slide::backgroundImagePath`, cover-fit
+      via `SlideRenderer`) — video backgrounds are still unbuilt
 - [ ] Real video decode/thumbnail/playback (VLC/FFmpeg-level work) for
       the Videos folder in the Media tab
 - [ ] Text styling: font, size, color, outline, per-theme presets

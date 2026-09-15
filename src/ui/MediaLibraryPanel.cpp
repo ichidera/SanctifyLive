@@ -18,11 +18,11 @@
 namespace
 {
 
-// Extensions worth offering today. Images actually render (as a
-// fallback swatch color -- see MediaTile below); video is catalog-only
-// for now, no decoder wired in, but real VLC/FFmpeg-level work is
-// planned (see README roadmap), so the filter already reflects the
-// common containers rather than a token single extension.
+// Extensions worth offering today. Images actually render for real (see
+// MediaTile/Slide::backgroundImagePath); video is catalog-only for now,
+// no decoder wired in, but real VLC/FFmpeg-level work is planned (see
+// README roadmap), so the filter already reflects the common containers
+// rather than a token single extension.
 const char *kSupportedImageFilter =
     "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.svg)";
 const char *kSupportedVideoFilter =
@@ -39,17 +39,20 @@ class MediaTile : public QFrame
     Q_OBJECT
 
 public:
-    // Built-in solid-color swatch (the original six Images placeholders).
+    // Built-in solid-color swatch (the original six Images placeholders):
+    // no backing file, so no imagePath -- `color` really is the slide's
+    // background, not a fallback.
     MediaTile(QString name, QColor color, QWidget *parent = nullptr)
-        : MediaTile(std::move(name), color, QPixmap(), /*interactive=*/true, parent)
+        : MediaTile(std::move(name), color, QPixmap(), QString(), /*interactive=*/true, parent)
     {
     }
 
-    // `thumbnail`, if non-null, is an actual downscaled render of a real
-    // imported file, so browsing is genuine rather than a placeholder.
-    // `color` is a fallback used only if/when this tile is activated or
-    // previewed -- Slide has no image-background field yet (see README
-    // roadmap), so we can't honestly show the real picture live.
+    // `thumbnail`, if non-null, is an actual downscaled render of
+    // `imagePath` for browsing. `imagePath`, when non-empty, is what
+    // actually gets used as the slide's live background (via
+    // Slide::backgroundImagePath) -- `color` in that case is only a
+    // fallback for if the file somehow fails to load at render time,
+    // never the real thing being shown.
     //
     // `interactive` controls whether clicking/double-clicking does
     // anything at all. Imported video tiles pass false: there's no
@@ -57,8 +60,10 @@ public:
     // video yet (no decoder, no renderer support), so rather than fake
     // an add-to-schedule action that doesn't mean what it looks like it
     // means, video tiles are catalog-only until that's real.
-    MediaTile(QString name, QColor color, QPixmap thumbnail, bool interactive, QWidget *parent = nullptr)
-        : QFrame(parent), m_name(std::move(name)), m_color(color), m_interactive(interactive)
+    MediaTile(QString name, QColor color, QPixmap thumbnail, QString imagePath, bool interactive,
+               QWidget *parent = nullptr)
+        : QFrame(parent), m_name(std::move(name)), m_color(color), m_imagePath(std::move(imagePath)),
+          m_interactive(interactive)
     {
         setObjectName("mediaTile");
         setCursor(interactive ? Qt::PointingHandCursor : Qt::ArrowCursor);
@@ -88,10 +93,6 @@ public:
         if (!interactive) {
             setToolTip(tr("Video is cataloged here, but playback and adding it to the "
                           "Schedule aren't implemented yet -- see the roadmap in README.md."));
-        } else if (!thumbnail.isNull()) {
-            setToolTip(tr("Imported image -- browsing shows the real file, but putting it "
-                          "live still uses a placeholder color (image backgrounds aren't "
-                          "wired into the renderer yet; see README roadmap)."));
         }
 
         auto *label = new QLabel(m_name, this);
@@ -102,31 +103,32 @@ public:
     }
 
 signals:
-    void activated(const QString &name, const QColor &color);
+    void activated(const QString &name, const QColor &color, const QString &imagePath);
     // Emitted on a single click/press so MediaLibraryPanel can forward
     // it up to OperatorWindow's Item Preview panel, without committing
     // anything to the schedule -- mirrors how clicking a Schedule row
     // stages Preview without going live.
-    void previewRequested(const QString &name, const QColor &color);
+    void previewRequested(const QString &name, const QColor &color, const QString &imagePath);
 
 protected:
     void mousePressEvent(QMouseEvent *event) override
     {
         QFrame::mousePressEvent(event);
         if (m_interactive)
-            emit previewRequested(m_name, m_color);
+            emit previewRequested(m_name, m_color, m_imagePath);
     }
 
     void mouseDoubleClickEvent(QMouseEvent *event) override
     {
         QFrame::mouseDoubleClickEvent(event);
         if (m_interactive)
-            emit activated(m_name, m_color);
+            emit activated(m_name, m_color, m_imagePath);
     }
 
 private:
     QString m_name;
     QColor m_color;
+    QString m_imagePath;
     bool m_interactive;
 };
 
@@ -194,7 +196,10 @@ MediaLibraryPanel::MediaFolder MediaLibraryPanel::buildImagesFolder()
     folder.page = scrollArea;
 
     // A small built-in set of solid-color swatches standing in for a
-    // real image library (see README roadmap).
+    // real image library (see README roadmap). These have no file
+    // behind them, so they're added with an empty image path -- addTile()
+    // treats that as "use the color directly", same as any imported
+    // photo would fall back to if its file somehow failed to load.
     struct Swatch { const char *name; const char *hex; };
     static const Swatch swatches[] = {
         {"Beach Sunset", "#e08a3c"},
@@ -299,9 +304,10 @@ void MediaLibraryPanel::onAddButtonClicked()
             nullptr, QFileDialog::DontUseNativeDialog);
         if (path.isEmpty())
             return;
-        // No thumbnail: no decoder wired in yet (see README roadmap).
-        // Not interactive: see MediaTile's doc comment on why a video
-        // tile shouldn't pretend clicking it means something yet.
+        // No thumbnail, no image path: no decoder wired in yet (see
+        // README roadmap). Not interactive: see MediaTile's doc comment
+        // on why a video tile shouldn't pretend clicking it means
+        // something yet.
         addTile(m_videosFolder, QFileInfo(path).completeBaseName(), QColor("#3a3f4b"), QString(), /*interactive=*/false);
         return;
     }
@@ -312,27 +318,27 @@ void MediaLibraryPanel::onAddButtonClicked()
     if (path.isEmpty())
         return;
 
-    QPixmap pixmap(path);
-    if (pixmap.isNull())
+    if (QPixmap(path).isNull())
         return; // not a decodable image -- fail quietly rather than adding a broken tile
 
-    // A cheap, honest stand-in for "the image's color" until Slide can
-    // carry a real background image (see README roadmap): downscaling
-    // to a single pixel with smooth interpolation gives an average of
-    // the whole picture, not just one corner.
-    const QColor averageColor = pixmap.scaled(1, 1, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).toImage().pixelColor(0, 0);
-
-    addTile(m_imagesFolder, QFileInfo(path).completeBaseName(), averageColor, path, /*interactive=*/true);
+    // The real file path travels with this tile from here on -- into
+    // its thumbnail, into previewRequested()/mediaActivated(), and from
+    // there into Slide::backgroundImagePath, so what the operator
+    // browses, previews, and puts live is the same actual photo, not a
+    // color approximation of it. The color here is only a fallback for
+    // the rare case the file becomes unreadable later (moved/deleted
+    // after import) -- not what's actually shown day to day.
+    addTile(m_imagesFolder, QFileInfo(path).completeBaseName(), QColor("#3a3f4b"), path, /*interactive=*/true);
 }
 
 void MediaLibraryPanel::addTile(MediaFolder &folder, const QString &name, const QColor &color,
-                                 const QString &thumbnailPath, bool interactive)
+                                 const QString &imagePath, bool interactive)
 {
     constexpr int columns = 3;
 
-    MediaTile *tile = thumbnailPath.isEmpty()
-                           ? new MediaTile(name, color, QPixmap(), interactive)
-                           : new MediaTile(name, color, QPixmap(thumbnailPath), interactive);
+    MediaTile *tile = imagePath.isEmpty()
+                           ? new MediaTile(name, color, QPixmap(), QString(), interactive)
+                           : new MediaTile(name, color, QPixmap(imagePath), imagePath, interactive);
     connect(tile, &MediaTile::activated, this, &MediaLibraryPanel::mediaActivated);
     connect(tile, &MediaTile::previewRequested, this, &MediaLibraryPanel::previewRequested);
     folder.grid->addWidget(tile, folder.nextRow, folder.nextCol);
