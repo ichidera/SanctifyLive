@@ -37,7 +37,7 @@
 OperatorWindow::OperatorWindow(QWidget *parent)
     : QMainWindow(parent), m_model(new ScheduleModel(this))
 {
-    setWindowTitle(tr("SanctifyLive - Operator"));
+    setWindowTitle(tr("SanctifyLive"));
     resize(1360, 820);
 
     // Two OutputWindow instances share the same model: one is the real
@@ -311,8 +311,14 @@ QWidget *OperatorWindow::buildLowerArea()
     splitter->addWidget(wrapInPanelCard(tr("Item Preview"), buildItemPreviewPanel()));
     splitter->addWidget(historyColumn);
     splitter->setStretchFactor(0, 3);
-    splitter->setStretchFactor(1, 1);
-    splitter->setStretchFactor(2, 2);
+    splitter->setStretchFactor(1, 2);
+    splitter->setStretchFactor(2, 1);
+    // Same reasoning as historyColumn above: without explicit initial
+    // sizes, QSplitter's first layout pass ignores stretch factors and
+    // splits space roughly evenly, which doesn't match the intended
+    // "Item Preview gets noticeably more room than History/Transcription"
+    // proportions. These match the app's default 1360px-wide window.
+    splitter->setSizes({624, 463, 237});
     return splitter;
 }
 
@@ -436,17 +442,21 @@ QWidget *OperatorWindow::buildTranscriptionPanel()
     // roadmap). This is an honest, disabled stub rather than a mock that
     // pretends to transcribe, matching how Songs/Scriptures/Presentations/
     // Themes are handled elsewhere in this window.
-    auto *label = new QLabel(
-        tr("Live transcription isn't implemented yet.\nSee the roadmap in README.md."), this);
+    //
+    // Kept deliberately short: this column is the narrowest of the three
+    // in the Lower Area (see buildLowerArea()), so a longer message
+    // wraps to 4+ lines and gets clipped instead of just wrapping
+    // cleanly. The full explanation still lives in the tooltip and in
+    // README.md's roadmap for anyone who wants more than the headline.
+    auto *label = new QLabel(tr("Not implemented yet.\nSee README roadmap."), this);
     label->setObjectName("nextSlideLabel");
     label->setAlignment(Qt::AlignCenter);
     label->setWordWrap(true);
     // Top-aligned with a fixed top margin rather than vertically centered
     // via stretches on both sides: centering stretches can squeeze a
     // wrapping label below its natural height when this column ends up
-    // narrow (three columns now share the Lower Area -- see
-    // buildLowerArea()), which made the two lines overlap instead of
-    // stacking. A fixed minimum height keeps that from happening even if
+    // narrow, which made the lines overlap/clip instead of stacking
+    // cleanly. A fixed minimum height keeps that from happening even if
     // the splitter briefly under-allocates space on first layout.
     label->setMinimumHeight(48);
 
