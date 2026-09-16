@@ -31,6 +31,7 @@
 #include "ui/LiveCaptionsPanel.h"
 #include "ui/MediaLibraryPanel.h"
 #include "ui/OutputWindow.h"
+#include "ui/ScripturePanel.h"
 #include "ui/SlideCanvas.h"
 #include "ui/Theme.h"
 
@@ -327,9 +328,11 @@ QTabWidget *OperatorWindow::buildContentTabs()
                      tr("No song library yet.\nSee the roadmap in README.md, or "
                         "double-click a background in the Media tab to try Schedule.")),
                  tr("Songs"));
-    tabs->addTab(makePlaceholder(
-                     tr("Scripture lookup isn't implemented yet.\nSee the roadmap in README.md.")),
-                 tr("Scriptures"));
+
+    m_scripturePanel = new ScripturePanel(this);
+    connect(m_scripturePanel, &ScripturePanel::scriptureActivated, this, &OperatorWindow::onScriptureActivated);
+    connect(m_scripturePanel, &ScripturePanel::previewRequested, this, &OperatorWindow::onScripturePreviewRequested);
+    tabs->addTab(m_scripturePanel, tr("Scriptures"));
 
     m_mediaPanel = new MediaLibraryPanel(this);
     connect(m_mediaPanel, &MediaLibraryPanel::mediaActivated, this, &OperatorWindow::onMediaActivated);
@@ -661,6 +664,25 @@ void OperatorWindow::onMediaPreviewRequested(const QString &name, const QColor &
     const Slide previewSlide(name, QString(), color, imagePath);
     m_itemPreviewCanvas->setPixmap(SlideRenderer::render(&previewSlide, kDesignResolution));
     m_itemPreviewLabel->setText(name);
+}
+
+void OperatorWindow::onScriptureActivated(const QString &reference, const QString &text)
+{
+    // Same "modest, real bridge into the live schedule" as
+    // onMediaActivated(): a plain black background (Slide's default) is
+    // the right call here -- Scripture doesn't have a theme/background
+    // of its own yet (see README roadmap's text-styling/theme items).
+    m_model->addSlide(Slide(reference, text));
+}
+
+void OperatorWindow::onScripturePreviewRequested(const QString &reference, const QString &text)
+{
+    // Renders exactly what onScriptureActivated() would actually add
+    // (same Slide construction), same reasoning as
+    // onMediaPreviewRequested().
+    const Slide previewSlide(reference, text);
+    m_itemPreviewCanvas->setPixmap(SlideRenderer::render(&previewSlide, kDesignResolution));
+    m_itemPreviewLabel->setText(reference);
 }
 
 // ---------------------------------------------------------------------

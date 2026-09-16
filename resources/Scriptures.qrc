@@ -1,0 +1,19 @@
+<!--
+    Embeds the bundled Scripture translation(s) into the executable
+    itself (AUTORCC, already enabled in CMakeLists.txt), rather than
+    reading Scriptures/KJV.json off disk at a path relative to the
+    working directory or install location. Unlike Media tab imports
+    (core/storage/MediaLibraryStore), which deliberately reference
+    external files the operator picked, Scripture text is bundled
+    content the app ships with; it should load identically no matter
+    how or from where SanctifyLive was launched.
+
+    Only KJV ships today (see ui/ScripturePanel's doc comment for why);
+    more translations arrive as their own resource entries once a real
+    Store exists to deliver them (see README roadmap).
+-->
+<RCC>
+    <qresource prefix="/scriptures">
+        <file alias="KJV.json">../Scriptures/KJV.json</file>
+    </qresource>
+</RCC>

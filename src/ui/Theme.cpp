@@ -161,6 +161,58 @@ QString stylesheet()
             color: %2;
         }
 
+        /* ---- Verse table (Scriptures tab) ---- */
+        QTableView {
+            background-color: %3;
+            border: 1px solid %4;
+            border-radius: 6px;
+            outline: none;
+            selection-background-color: rgba(59, 130, 246, 0.18);
+            selection-color: %2;
+        }
+        QTableView::item {
+            padding: 6px 8px;
+            border-bottom: 1px solid %4;
+        }
+        QTableView::item:selected {
+            background-color: rgba(59, 130, 246, 0.18);
+            border-left: 3px solid %6;
+            color: %2;
+        }
+        QHeaderView::section {
+            background-color: %5;
+            color: %9;
+            padding: 6px 8px;
+            border: none;
+            border-bottom: 1px solid %4;
+            border-right: 1px solid %4;
+            font-weight: 600;
+            font-size: 11px;
+        }
+        QTableCornerButton::section { background-color: %5; border: none; }
+
+        /* ---- Text fields (Scriptures tab search box) ---- */
+        QLineEdit {
+            background-color: %5;
+            border: 1px solid %4;
+            border-radius: 6px;
+            padding: 6px 8px;
+            color: %2;
+            selection-background-color: %6;
+        }
+        QLineEdit:focus { border: 1px solid %6; }
+
+        /* Text-only "link" style button (e.g. Scriptures' "More Available...") */
+        QPushButton#linkButton {
+            background: transparent;
+            border: none;
+            color: %6;
+            padding: 4px 2px;
+            text-align: left;
+        }
+        QPushButton#linkButton:hover { text-decoration: underline; }
+        QPushButton#linkButton:pressed { color: %7; }
+
         /* ---- Live captions display (Transcription panel) ---- */
         QPlainTextEdit#liveCaptionsView {
             background-color: %5;

@@ -20,13 +20,18 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 #                   schedule (MediaLibraryStore remembers imported media
 #                   across relaunches). Same no-Qt-widgets rule as
 #                   core/model/.
+#   core/scripture/ - ScriptureLibrary, the bundled-translation loader
+#                   for the Scriptures tab (reads the embedded KJV.json
+#                   resource -- see resources/Scriptures.qrc). Same
+#                   no-Qt-widgets rule as core/model/.
 #   core/render/  - turns model data into pixels (SlideRenderer, the
 #                   design-resolution contract). No knowledge of physical
 #                   windows.
 #   ui/          - Qt widgets that display things and take input
 #                  (OperatorWindow, OutputWindow, SlideCanvas,
-#                  MediaLibraryPanel, Theme). No slide-drawing logic of
-#                  its own -- it only asks core/render for pixmaps.
+#                  MediaLibraryPanel, ScripturePanel, Theme). No
+#                  slide-drawing logic of its own -- it only asks
+#                  core/render for pixmaps.
 #
 # Dependency direction is one-way: ui/ -> core/render/ -> core/model/.
 # Nothing in core/ ever includes anything from ui/, which is what lets a
@@ -47,6 +52,9 @@ add_executable(SanctifyLive
     src/core/storage/MediaLibraryStore.h
     src/core/storage/MediaLibraryStore.cpp
 
+    src/core/scripture/ScriptureLibrary.h
+    src/core/scripture/ScriptureLibrary.cpp
+
     src/core/render/RenderResolution.h
     src/core/render/SlideRenderer.h
     src/core/render/SlideRenderer.cpp
@@ -57,12 +65,16 @@ add_executable(SanctifyLive
     src/ui/SlideCanvas.cpp
     src/ui/MediaLibraryPanel.h
     src/ui/MediaLibraryPanel.cpp
+    src/ui/ScripturePanel.h
+    src/ui/ScripturePanel.cpp
     src/ui/LiveCaptionsPanel.h
     src/ui/LiveCaptionsPanel.cpp
     src/ui/OutputWindow.h
     src/ui/OutputWindow.cpp
     src/ui/OperatorWindow.h
     src/ui/OperatorWindow.cpp
+
+    resources/Scriptures.qrc
 )
 
 target_include_directories(SanctifyLive PRIVATE src)

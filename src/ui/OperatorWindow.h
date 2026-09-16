@@ -15,6 +15,7 @@ class ScheduleModel;
 class OutputWindow;
 class SlideCanvas;
 class MediaLibraryPanel;
+class ScripturePanel;
 class LiveCaptionsPanel;
 
 // =====================================================================
@@ -73,8 +74,11 @@ class LiveCaptionsPanel;
 //                       material to add to Schedule. Built by
 //                       buildContentTabs(). The Media tab's own
 //                       internals (folder tree + thumbnail grid) are
-//                       MediaLibraryPanel's job, not this class's --
-//                       see that header's own glossary note.
+//                       MediaLibraryPanel's job, and the Scriptures
+//                       tab's own internals (translation checklist +
+//                       verse table) are ScripturePanel's job -- not
+//                       this class's -- see each header's own glossary
+//                       note.
 //     ITEM PREVIEW      The middle column -- sits in the gap between
 //                       Content Tabs and History, not wedged inside any
 //                       one Content Tab (see MediaLibraryPanel's own
@@ -161,6 +165,8 @@ private slots:
     void onSaveSchedule();
     void onMediaActivated(const QString &name, const QColor &color, const QString &imagePath);
     void onMediaPreviewRequested(const QString &name, const QColor &color, const QString &imagePath);
+    void onScriptureActivated(const QString &reference, const QString &text);
+    void onScripturePreviewRequested(const QString &reference, const QString &text);
 
 private:
     QToolBar *buildToolBar();
@@ -200,5 +206,6 @@ private:
     QPushButton *m_goLiveButton;
 
     MediaLibraryPanel *m_mediaPanel;
+    ScripturePanel *m_scripturePanel;
     LiveCaptionsPanel *m_liveCaptionsPanel; // TRANSCRIPTION panel: scrolling live-speech display
 };
