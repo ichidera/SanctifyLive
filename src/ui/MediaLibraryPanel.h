@@ -6,12 +6,14 @@
 
 #include "core/storage/MediaLibraryStore.h"
 
+class QEvent;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QGridLayout;
 class QLabel;
 class QToolButton;
 class QStackedWidget;
+class QScrollArea;
 
 // MediaLibraryPanel is the MEDIA tab (one of the Content Tabs -- see
 // OperatorWindow's panel glossary): a folder tree on the left (Videos,
@@ -79,17 +81,28 @@ signals:
     // row only updates Preview.
     void previewRequested(const QString &name, const QColor &color, const QString &imagePath);
 
+protected:
+    // Watches each folder's scroll-area viewport for resizes so tiles
+    // reflow to the new width -- see relayoutFolder(). A plain
+    // resizeEvent() override on this panel isn't enough: the viewport
+    // can change width without this panel itself resizing (e.g. a
+    // scrollbar appearing/disappearing eats into it from the splitter's
+    // other side).
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
     // One folder's worth of state: its own page (so QStackedWidget can
-    // show exactly one folder's grid at a time) and its own grid
-    // placement cursor (so Images and Videos fill their grids
-    // independently instead of sharing row/col counters).
+    // show exactly one folder's grid at a time) and its own tile list,
+    // so Images and Videos reflow independently. Tiles are stored as
+    // QWidget* (not the anonymous-namespace MediaTile* they actually
+    // are) since that's all relayoutFolder() needs, and it keeps
+    // MediaTile a pure implementation detail of the .cpp -- nothing in
+    // this header has to know it exists.
     struct MediaFolder
     {
-        QWidget *page = nullptr;
+        QScrollArea *page = nullptr;
         QGridLayout *grid = nullptr;
-        int nextRow = 0;
-        int nextCol = 0;
+        QVector<QWidget *> tiles;
     };
 
     void buildFolderTree(QTreeWidget *tree);
@@ -99,6 +112,14 @@ private:
 
     void addTile(MediaFolder &folder, const QString &name, const QColor &color,
                  const QString &imagePath, bool interactive);
+
+    // Re-flows a folder's tiles into however many equal-width columns
+    // currently fit its viewport, stretching each tile to fill the row
+    // rather than leaving unclaimed space down the right edge. Called
+    // whenever a tile is added and whenever the folder's viewport width
+    // changes (see eventFilter()).
+    void relayoutFolder(MediaFolder &folder);
+
     void onTreeSelectionChanged(QTreeWidgetItem *current);
     void onAddButtonClicked();
     void refreshItemCount();

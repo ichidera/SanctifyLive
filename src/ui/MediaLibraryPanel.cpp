@@ -1,6 +1,7 @@
 #include "ui/MediaLibraryPanel.h"
 
 #include <QDebug>
+#include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
@@ -143,7 +144,13 @@ MediaLibraryPanel::MediaLibraryPanel(QWidget *parent) : QWidget(parent)
 
     m_tree = new QTreeWidget(splitter);
     m_tree->setHeaderHidden(true);
-    m_tree->setMaximumWidth(200);
+    // Fixed (not just capped) width: the folder list only ever needs to
+    // show a couple of short names ("Videos", "Images"), so a generous
+    // flexible max just reserved dead space no content would ever fill
+    // -- that's what was showing up as a wide empty strip to the left of
+    // the grid. Fixed rather than a smaller max so the splitter can't
+    // decide to stretch it either.
+    m_tree->setFixedWidth(130);
     buildFolderTree(m_tree);
     connect(m_tree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *current, QTreeWidgetItem *) {
         onTreeSelectionChanged(current);
@@ -158,8 +165,26 @@ MediaLibraryPanel::MediaLibraryPanel(QWidget *parent) : QWidget(parent)
     m_stack->setCurrentWidget(m_imagesFolder.page); // matches buildFolderTree()'s default selection
     splitter->addWidget(m_stack);
 
+    // Tiles reflow to fill whatever width they're given -- see
+    // relayoutFolder() -- so each folder's scroll area needs to tell
+    // this panel when its available width actually changes (its own
+    // resizeEvent isn't enough: the QScrollArea can resize without its
+    // viewport's width changing, e.g. a scrollbar appearing/disappearing
+    // changes the split the other way).
+    m_imagesFolder.page->viewport()->installEventFilter(this);
+    m_videosFolder.page->viewport()->installEventFilter(this);
+
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1);
+    // Same reasoning as OperatorWindow's Lower Area splitter: QSplitter
+    // only *honors* stretch factors on subsequent resizes, so without an
+    // explicit initial split, this splitter's first layout pass (before
+    // this panel has settled into its real width) can leave a big chunk
+    // of the pane's width completely unclaimed by either child. m_tree
+    // is a fixed width, so the second number here just needs to be
+    // "large enough that it's obviously the remainder" -- QSplitter
+    // clamps it to whatever's actually left over.
+    splitter->setSizes({130, 5000});
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -348,6 +373,66 @@ void MediaLibraryPanel::onAddButtonClicked()
     persistImportedMedia(name, path, /*isVideo=*/false);
 }
 
+void MediaLibraryPanel::addTile(MediaFolder &folder, const QString &name, const QColor &color,
+                                 const QString &imagePath, bool interactive)
+{
+    MediaTile *tile = imagePath.isEmpty()
+                           ? new MediaTile(name, color, QPixmap(), QString(), interactive)
+                           : new MediaTile(name, color, QPixmap(imagePath), imagePath, interactive);
+    connect(tile, &MediaTile::activated, this, &MediaLibraryPanel::mediaActivated);
+    connect(tile, &MediaTile::previewRequested, this, &MediaLibraryPanel::previewRequested);
+    folder.tiles.append(tile);
+    relayoutFolder(folder);
+    refreshItemCount();
+}
+
+void MediaLibraryPanel::relayoutFolder(MediaFolder &folder)
+{
+    // Tiles stretch to fill whatever width they're given, rather than
+    // sitting at a fixed size and leaving the remainder of the row
+    // empty -- that leftover space (worse the wider the panel) was
+    // exactly the "unnecessary space" complaint. minTileWidth is used
+    // only as the *minimum* comfortable width when deciding how many
+    // columns fit; every tile in a row is then stretched to share the
+    // full available width evenly, so the grid always ends flush with
+    // the right edge. Called both when a tile is added and (via the
+    // viewport event filter installed in the constructor) whenever that
+    // width changes.
+    constexpr int minTileWidth = 90;
+    constexpr int spacing = 12;
+    constexpr int margins = 12 * 2;
+
+    if (folder.tiles.isEmpty() || !folder.page)
+        return;
+
+    const int available = folder.page->viewport()->width() - margins;
+    const int columns = qMax(1, (available + spacing) / (minTileWidth + spacing));
+    const int tileWidth = (available - (columns - 1) * spacing) / columns;
+
+    // Detach every tile from the grid without deleting the tiles
+    // themselves (takeAt() hands back ownership of the QLayoutItem
+    // wrapper, not the widget -- that wrapper is what actually needs
+    // deleting here).
+    while (QLayoutItem *item = folder.grid->takeAt(0))
+        delete item;
+
+    for (int i = 0; i < folder.tiles.size(); ++i) {
+        folder.tiles[i]->setFixedWidth(tileWidth);
+        folder.grid->addWidget(folder.tiles[i], i / columns, i % columns);
+    }
+}
+
+bool MediaLibraryPanel::eventFilter(QObject *watched, QEvent *event)
+{
+    if (event->type() == QEvent::Resize) {
+        if (m_imagesFolder.page && watched == m_imagesFolder.page->viewport())
+            relayoutFolder(m_imagesFolder);
+        else if (m_videosFolder.page && watched == m_videosFolder.page->viewport())
+            relayoutFolder(m_videosFolder);
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
 void MediaLibraryPanel::loadPersistedMedia()
 {
     QString errorMessage;
@@ -413,26 +498,6 @@ void MediaLibraryPanel::persistImportedMedia(const QString &name, const QString 
         // operator with a dialog mid-import.
         qWarning() << "MediaLibraryPanel: failed to save media library:" << errorMessage;
     }
-}
-
-void MediaLibraryPanel::addTile(MediaFolder &folder, const QString &name, const QColor &color,
-                                 const QString &imagePath, bool interactive)
-{
-    constexpr int columns = 3;
-
-    MediaTile *tile = imagePath.isEmpty()
-                           ? new MediaTile(name, color, QPixmap(), QString(), interactive)
-                           : new MediaTile(name, color, QPixmap(imagePath), imagePath, interactive);
-    connect(tile, &MediaTile::activated, this, &MediaLibraryPanel::mediaActivated);
-    connect(tile, &MediaTile::previewRequested, this, &MediaLibraryPanel::previewRequested);
-    folder.grid->addWidget(tile, folder.nextRow, folder.nextCol);
-
-    if (++folder.nextCol >= columns) {
-        folder.nextCol = 0;
-        ++folder.nextRow;
-    }
-
-    refreshItemCount();
 }
 
 void MediaLibraryPanel::refreshItemCount()
