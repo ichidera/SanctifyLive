@@ -10,6 +10,7 @@
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
+#include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QListWidget>
@@ -28,7 +29,6 @@
 #include "core/model/ScheduleModel.h"
 #include "core/render/RenderResolution.h"
 #include "core/render/SlideRenderer.h"
-#include "ui/LiveCaptionsPanel.h"
 #include "ui/MediaLibraryPanel.h"
 #include "ui/OutputWindow.h"
 #include "ui/ScripturePanel.h"
@@ -38,7 +38,7 @@
 OperatorWindow::OperatorWindow(QWidget *parent)
     : QMainWindow(parent), m_model(new ScheduleModel(this))
 {
-    setWindowTitle(tr("SanctifyLive"));
+    setWindowTitle(tr("SanctifyLive - Operator"));
     resize(1360, 820);
 
     // Two OutputWindow instances share the same model: one is the real
@@ -77,6 +77,10 @@ OperatorWindow::OperatorWindow(QWidget *parent)
     connect(m_model, &ScheduleModel::scheduleChanged, this, &OperatorWindow::onScheduleChanged);
     connect(m_model, &ScheduleModel::liveContentChanged, this, &OperatorWindow::onLiveContentChanged);
     connect(m_model, &ScheduleModel::historyChanged, this, &OperatorWindow::onHistoryChanged);
+
+    // A couple of starter slides so the app isn't empty on first launch.
+    m_model->addSlide(Slide(tr("Welcome"), tr("Welcome to the service"), QColor("#1a1a2e")));
+    m_model->addSlide(Slide(tr("Announcement"), tr("Coffee & fellowship after the service"), QColor("#16213e")));
 
     updateLiveIndicator();
     updateStatusBar();
@@ -174,6 +178,12 @@ void OperatorWindow::buildMenuBar(QToolBar *toolBar)
     fileMenu->addSeparator();
     connect(fileMenu->addAction(tr("E&xit")), &QAction::triggered, this, &QWidget::close);
 
+    QMenu *editMenu = bar->addMenu(tr("&Edit"));
+    connect(editMenu->addAction(tr("&Add Slide\u2026")), &QAction::triggered,
+            this, &OperatorWindow::onAddSlideClicked);
+    connect(editMenu->addAction(tr("&Remove Selected Slide")), &QAction::triggered,
+            this, &OperatorWindow::onRemoveSlideClicked);
+
     QMenu *liveMenu = bar->addMenu(tr("&Live"));
     QAction *goLiveAction = liveMenu->addAction(tr("&Go Live"));
     goLiveAction->setCheckable(true);
@@ -190,6 +200,9 @@ void OperatorWindow::buildMenuBar(QToolBar *toolBar)
 
     connect(liveMenu->addAction(tr("&Clear")), &QAction::triggered,
             this, &OperatorWindow::onClearClicked);
+    liveMenu->addSeparator();
+    connect(liveMenu->addAction(tr("Ne&xt")), &QAction::triggered, m_model, &ScheduleModel::advance);
+    connect(liveMenu->addAction(tr("Pre&vious")), &QAction::triggered, m_model, &ScheduleModel::retreat);
 
     // Profiles (per-venue/per-service settings presets) has no backing
     // feature yet -- see README roadmap -- so this menu is a labeled,
@@ -252,11 +265,11 @@ QWidget *OperatorWindow::buildMainRow()
 
 QWidget *OperatorWindow::buildTransportRow()
 {
-    // Previous/Next buttons were removed -- advancing/retreating still
-    // works via double-clicking a Schedule row or the keyboard shortcuts
-    // (arrow keys/space/B; see keyPressEvent()), it just isn't a
-    // standalone button pair anymore. What's left here is purely
-    // informational: a heads-up on what's coming next.
+    m_prevButton = new QPushButton(tr("\u2039\u2039 Previous"), this);
+    m_nextButton = new QPushButton(tr("Next \u203A\u203A"), this);
+    connect(m_prevButton, &QPushButton::clicked, m_model, &ScheduleModel::retreat);
+    connect(m_nextButton, &QPushButton::clicked, m_model, &ScheduleModel::advance);
+
     m_nextSlideLabel = new QLabel(tr("Next: -"), this);
     m_nextSlideLabel->setObjectName("nextSlideLabel");
     m_nextSlideLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -264,6 +277,8 @@ QWidget *OperatorWindow::buildTransportRow()
     auto *row = new QWidget(this);
     auto *layout = new QHBoxLayout(row);
     layout->setContentsMargins(0, 0, 0, 0);
+    layout->addWidget(m_prevButton);
+    layout->addWidget(m_nextButton);
     layout->addStretch(1);
     layout->addWidget(m_nextSlideLabel);
     return row;
@@ -271,40 +286,22 @@ QWidget *OperatorWindow::buildTransportRow()
 
 QWidget *OperatorWindow::buildLowerArea()
 {
-    // Three columns, left to right: CONTENT TABS, then ITEM PREVIEW
-    // sitting in the gap between Content Tabs and HISTORY (with
-    // TRANSCRIPTION stacked below History). Item Preview belongs in
-    // that gap -- not wedged inside the Media tab itself (see
-    // MediaLibraryPanel's own glossary note), since it previews
-    // whatever's selected across Content Tabs in general, not just
-    // Media. This is a different "preview" than the Main Row's Preview
-    // panel above: that one stages the next *service* item; this one
-    // previews *library content* before it's even added to Schedule.
-    auto *historyColumn = new QSplitter(Qt::Vertical, this);
-    historyColumn->addWidget(wrapInPanelCard(tr("History"), buildHistoryPanel()));
-    historyColumn->addWidget(wrapInPanelCard(tr("Transcription"), buildTranscriptionPanel()));
-    historyColumn->setStretchFactor(0, 1);
-    historyColumn->setStretchFactor(1, 1);
-    // QSplitter only *honors* stretch factors on subsequent resizes; the
-    // very first layout pass splits space roughly evenly regardless,
-    // which can under-allocate a panel below its content's natural
-    // height. Setting explicit initial sizes (History gets a bit more,
-    // Transcription gets enough for its label + button) avoids that.
-    historyColumn->setSizes({220, 160});
+    // Where the Queue panel used to sit (to the right of the content
+    // tabs) now holds two panels stacked vertically: History (an
+    // append-only log of what has actually gone live) and Transcription
+    // (a placeholder -- see buildTranscriptionPanel()). The run order
+    // itself lives in the Schedule panel now, up in the main row.
+    auto *rightSplitter = new QSplitter(Qt::Vertical, this);
+    rightSplitter->addWidget(wrapInPanelCard(tr("History"), buildHistoryPanel()));
+    rightSplitter->addWidget(wrapInPanelCard(tr("Transcription"), buildTranscriptionPanel()));
+    rightSplitter->setStretchFactor(0, 1);
+    rightSplitter->setStretchFactor(1, 1);
 
     auto *splitter = new QSplitter(this);
     splitter->addWidget(buildContentTabs());
-    splitter->addWidget(wrapInPanelCard(tr("Item Preview"), buildItemPreviewPanel()));
-    splitter->addWidget(historyColumn);
-    splitter->setStretchFactor(0, 3);
-    splitter->setStretchFactor(1, 2);
-    splitter->setStretchFactor(2, 1);
-    // Same reasoning as historyColumn above: without explicit initial
-    // sizes, QSplitter's first layout pass ignores stretch factors and
-    // splits space roughly evenly, which doesn't match the intended
-    // "Item Preview gets noticeably more room than History/Transcription"
-    // proportions. These match the app's default 1360px-wide window.
-    splitter->setSizes({624, 463, 237});
+    splitter->addWidget(rightSplitter);
+    splitter->setStretchFactor(0, 2);
+    splitter->setStretchFactor(1, 1);
     return splitter;
 }
 
@@ -325,8 +322,8 @@ QTabWidget *OperatorWindow::buildContentTabs()
 
     auto *tabs = new QTabWidget(this);
     tabs->addTab(makePlaceholder(
-                     tr("No song library yet.\nSee the roadmap in README.md, or "
-                        "double-click a background in the Media tab to try Schedule.")),
+                     tr("No song library yet.\nUse \u201c+ Add Slide\u201d in the Schedule panel, "
+                        "or double-click a background in the Media tab.")),
                  tr("Songs"));
 
     m_scripturePanel = new ScripturePanel(this);
@@ -336,7 +333,6 @@ QTabWidget *OperatorWindow::buildContentTabs()
 
     m_mediaPanel = new MediaLibraryPanel(this);
     connect(m_mediaPanel, &MediaLibraryPanel::mediaActivated, this, &OperatorWindow::onMediaActivated);
-    connect(m_mediaPanel, &MediaLibraryPanel::previewRequested, this, &OperatorWindow::onMediaPreviewRequested);
     tabs->addTab(m_mediaPanel, tr("Media"));
 
     tabs->addTab(makePlaceholder(tr("Presentations aren't implemented yet.\nSee the roadmap in README.md.")),
@@ -350,23 +346,24 @@ QTabWidget *OperatorWindow::buildContentTabs()
 
 QWidget *OperatorWindow::buildSchedulePanel()
 {
-    // Single click stages a row in Preview without going live;
-    // double-click (or keyboard shortcuts) commits it live. This
+    // Single click stages a row in Preview without going live; double-
+    // click (or Next/Previous/keyboard shortcuts) commits it live. This
     // matches OpenLP's Service Manager, where a single click on a
     // service item sends it to the Preview slide controller and a
     // double-click sends it straight to Live.
-    //
-    // There's no manual "type a slide's text in" flow anymore -- real
-    // schedule items are meant to come from picking real content
-    // (Songs/Scriptures/Media/Presentations), not free-typed text, so a
-    // freeform Add/Remove pair here would model a workflow the app
-    // isn't actually going to have. Schedule starts empty; it fills up
-    // as those content tabs grow real add-to-schedule actions (Media's
-    // mediaActivated() already works this way -- see onMediaActivated()).
     m_scheduleList = new QListWidget(this);
     m_scheduleList->setWordWrap(true);
     connect(m_scheduleList, &QListWidget::currentRowChanged, this, &OperatorWindow::onScheduleItemSelected);
     connect(m_scheduleList, &QListWidget::itemActivated, this, &OperatorWindow::onScheduleItemActivated);
+
+    m_addButton = new QPushButton(tr("+ Add Slide"), this);
+    m_removeButton = new QPushButton(tr("Remove"), this);
+    connect(m_addButton, &QPushButton::clicked, this, &OperatorWindow::onAddSlideClicked);
+    connect(m_removeButton, &QPushButton::clicked, this, &OperatorWindow::onRemoveSlideClicked);
+
+    auto *buttonRow = new QHBoxLayout();
+    buttonRow->addWidget(m_addButton);
+    buttonRow->addWidget(m_removeButton);
 
     auto *hint = new QLabel(tr("Click to preview, double-click (or press Go Live) to put a slide on air."), this);
     hint->setObjectName("nextSlideLabel");
@@ -377,32 +374,7 @@ QWidget *OperatorWindow::buildSchedulePanel()
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(m_scheduleList, /*stretch=*/1);
     layout->addWidget(hint);
-    return wrapper;
-}
-
-QWidget *OperatorWindow::buildItemPreviewPanel()
-{
-    // Shows a pixel-faithful render of whatever's currently
-    // selected/hovered in Content Tabs (Media today; Songs/
-    // Presentations/Themes once they're real), using the exact same
-    // SlideRenderer/SlideCanvas pipeline as Schedule/Preview/Live, so
-    // what's shown here never diverges from what actually appears once
-    // it's added to Schedule and put on air.
-    m_itemPreviewCanvas = new SlideCanvas(this);
-    m_itemPreviewCanvas->setMinimumHeight(120);
-    m_itemPreviewCanvas->setPixmap(SlideRenderer::render(nullptr, kDesignResolution));
-
-    m_itemPreviewLabel = new QLabel(tr("Select an item to preview"), this);
-    m_itemPreviewLabel->setObjectName("nextSlideLabel");
-    m_itemPreviewLabel->setAlignment(Qt::AlignCenter);
-    m_itemPreviewLabel->setWordWrap(true);
-
-    auto *wrapper = new QWidget(this);
-    auto *layout = new QVBoxLayout(wrapper);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(6);
-    layout->addWidget(m_itemPreviewCanvas, /*stretch=*/1);
-    layout->addWidget(m_itemPreviewLabel);
+    layout->addLayout(buttonRow);
     return wrapper;
 }
 
@@ -423,14 +395,16 @@ QWidget *OperatorWindow::buildHistoryPanel()
 
 QWidget *OperatorWindow::buildTranscriptionPanel()
 {
-    // The display itself is real now (see LiveCaptionsPanel) -- what's
-    // still missing is anything to feed it: there's no audio capture or
-    // speech-to-text engine anywhere in this project yet (see README
-    // roadmap). Start Transcription stays an honest disabled stub until
-    // that exists, matching how Songs/Scriptures/Presentations/Themes
-    // are handled elsewhere in this window; appendCaption() is ready
-    // for whenever a real pipeline lands.
-    m_liveCaptionsPanel = new LiveCaptionsPanel(this);
+    // Live speech-to-text isn't implemented yet -- there's no audio
+    // capture/transcription pipeline in the project at all (see README
+    // roadmap). This is an honest, disabled stub rather than a mock that
+    // pretends to transcribe, matching how Songs/Scriptures/Presentations/
+    // Themes are handled elsewhere in this window.
+    auto *label = new QLabel(
+        tr("Live transcription isn't implemented yet.\nSee the roadmap in README.md."), this);
+    label->setObjectName("nextSlideLabel");
+    label->setAlignment(Qt::AlignCenter);
+    label->setWordWrap(true);
 
     auto *startButton = new QPushButton(tr("Start Transcription"), this);
     startButton->setEnabled(false);
@@ -438,16 +412,37 @@ QWidget *OperatorWindow::buildTranscriptionPanel()
 
     auto *wrapper = new QWidget(this);
     auto *layout = new QVBoxLayout(wrapper);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(6);
-    layout->addWidget(m_liveCaptionsPanel, /*stretch=*/1);
+    layout->addStretch(1);
+    layout->addWidget(label);
     layout->addWidget(startButton, 0, Qt::AlignCenter);
+    layout->addStretch(1);
     return wrapper;
 }
 
 // ---------------------------------------------------------------------
 // Slots
 // ---------------------------------------------------------------------
+
+void OperatorWindow::onAddSlideClicked()
+{
+    bool ok = false;
+    const QString text = QInputDialog::getMultiLineText(
+        this, tr("Add Slide"), tr("Slide text:"), QString(), &ok);
+    if (!ok || text.trimmed().isEmpty())
+        return;
+
+    // Use the first line as the schedule-list label so the operator can
+    // scan the list without the full text cluttering it.
+    const QString label = text.section('\n', 0, 0).left(40);
+    m_model->addSlide(Slide(label, text));
+}
+
+void OperatorWindow::onRemoveSlideClicked()
+{
+    const int row = m_scheduleList->currentRow();
+    if (row >= 0)
+        m_model->removeSlideAt(row);
+}
 
 void OperatorWindow::onScheduleItemSelected(int row)
 {
@@ -646,24 +641,12 @@ void OperatorWindow::onSaveSchedule()
     }
 }
 
-void OperatorWindow::onMediaActivated(const QString &name, const QColor &color, const QString &imagePath)
+void OperatorWindow::onMediaActivated(const QString &name, const QColor &color)
 {
-    // A modest, real bridge from the Media browser into the live
-    // schedule: drop a new slide using this tile's real image (when
-    // imported) or its swatch color (when built-in) straight onto the
-    // end of the Schedule.
-    m_model->addSlide(Slide(name, QString(), color, imagePath));
-}
-
-void OperatorWindow::onMediaPreviewRequested(const QString &name, const QColor &color, const QString &imagePath)
-{
-    // Renders exactly what onMediaActivated() would actually add (same
-    // Slide construction), so the Item Preview panel is never a lie
-    // about what double-clicking would produce -- an imported photo
-    // shows as the real photo here, not an approximated color.
-    const Slide previewSlide(name, QString(), color, imagePath);
-    m_itemPreviewCanvas->setPixmap(SlideRenderer::render(&previewSlide, kDesignResolution));
-    m_itemPreviewLabel->setText(name);
+    // A modest, real bridge from the (currently cosmetic) Media browser
+    // into the live schedule: drop a new slide using this swatch as its
+    // background straight onto the end of the Schedule.
+    m_model->addSlide(Slide(name, QString(), color));
 }
 
 void OperatorWindow::onScriptureActivated(const QString &reference, const QString &text)

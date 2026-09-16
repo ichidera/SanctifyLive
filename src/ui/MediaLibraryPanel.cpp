@@ -1,103 +1,51 @@
 #include "ui/MediaLibraryPanel.h"
 
-#include <QDebug>
-#include <QEvent>
-#include <QFileDialog>
-#include <QFileInfo>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
-#include <QPixmap>
 #include <QScrollArea>
 #include <QSplitter>
-#include <QStackedWidget>
-#include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
-#include "core/storage/MediaLibraryStore.h"
+#include "core/model/Slide.h"
+#include "core/render/RenderResolution.h"
+#include "core/render/SlideRenderer.h"
+#include "ui/SlideCanvas.h"
 
 namespace
 {
 
-// Extensions worth offering today. Images actually render for real (see
-// MediaTile/Slide::backgroundImagePath); video is catalog-only for now,
-// no decoder wired in, but real VLC/FFmpeg-level work is planned (see
-// README roadmap), so the filter already reflects the common containers
-// rather than a token single extension.
-const char *kSupportedImageFilter =
-    "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.svg)";
-const char *kSupportedVideoFilter =
-    "Videos (*.mp4 *.mov *.mkv *.avi *.webm)";
-
-// A single thumbnail tile. Kept local to this .cpp (rather than its own
-// header) since MediaLibraryPanel is its only user. It needs Q_OBJECT
-// for the `activated` signal, which is why this file ends with an
-// explicit `#include "MediaLibraryPanel.moc"` -- classes with Q_OBJECT
-// defined inside a .cpp (rather than a header) need that so CMake's
-// AUTOMOC can generate and compile their moc code.
+// A single clickable/double-clickable thumbnail tile. Kept local to
+// this .cpp (rather than its own header) since MediaLibraryPanel is its
+// only user. It needs Q_OBJECT for the `activated` signal, which is why
+// this file ends with an explicit `#include "MediaLibraryPanel.moc"` --
+// classes with Q_OBJECT defined inside a .cpp (rather than a header)
+// need that so CMake's AUTOMOC can generate and compile their moc code.
 class MediaTile : public QFrame
 {
     Q_OBJECT
 
 public:
-    // Built-in solid-color swatch (the original six Images placeholders):
-    // no backing file, so no imagePath -- `color` really is the slide's
-    // background, not a fallback.
     MediaTile(QString name, QColor color, QWidget *parent = nullptr)
-        : MediaTile(std::move(name), color, QPixmap(), QString(), /*interactive=*/true, parent)
-    {
-    }
-
-    // `thumbnail`, if non-null, is an actual downscaled render of
-    // `imagePath` for browsing. `imagePath`, when non-empty, is what
-    // actually gets used as the slide's live background (via
-    // Slide::backgroundImagePath) -- `color` in that case is only a
-    // fallback for if the file somehow fails to load at render time,
-    // never the real thing being shown.
-    //
-    // `interactive` controls whether clicking/double-clicking does
-    // anything at all. Imported video tiles pass false: there's no
-    // honest "this is what it'll look like live" answer to give for
-    // video yet (no decoder, no renderer support), so rather than fake
-    // an add-to-schedule action that doesn't mean what it looks like it
-    // means, video tiles are catalog-only until that's real.
-    MediaTile(QString name, QColor color, QPixmap thumbnail, QString imagePath, bool interactive,
-               QWidget *parent = nullptr)
-        : QFrame(parent), m_name(std::move(name)), m_color(color), m_imagePath(std::move(imagePath)),
-          m_interactive(interactive)
+        : QFrame(parent), m_name(std::move(name)), m_color(color)
     {
         setObjectName("mediaTile");
-        setCursor(interactive ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        setCursor(Qt::PointingHandCursor);
         setFixedSize(104, 96);
 
         auto *layout = new QVBoxLayout(this);
         layout->setContentsMargins(6, 6, 6, 6);
         layout->setSpacing(4);
 
-        if (thumbnail.isNull()) {
-            auto *swatch = new QFrame(this);
-            swatch->setFixedHeight(56);
-            swatch->setStyleSheet(
-                QString("background-color: %1; border-radius: 5px; border: none;")
-                    .arg(m_color.name()));
-            layout->addWidget(swatch);
-        } else {
-            auto *thumb = new QLabel(this);
-            thumb->setFixedHeight(56);
-            thumb->setAlignment(Qt::AlignCenter);
-            thumb->setScaledContents(false);
-            thumb->setPixmap(thumbnail.scaled(92, 56, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-            thumb->setStyleSheet("border-radius: 5px;");
-            layout->addWidget(thumb, 0, Qt::AlignCenter);
-        }
-
-        if (!interactive) {
-            setToolTip(tr("Video is cataloged here, but playback and adding it to the "
-                          "Schedule aren't implemented yet -- see the roadmap in README.md."));
-        }
+        auto *swatch = new QFrame(this);
+        swatch->setFixedHeight(56);
+        swatch->setStyleSheet(
+            QString("background-color: %1; border-radius: 5px; border: none;")
+                .arg(m_color.name()));
+        layout->addWidget(swatch);
 
         auto *label = new QLabel(m_name, this);
         label->setObjectName("mediaTileLabel");
@@ -107,33 +55,28 @@ public:
     }
 
 signals:
-    void activated(const QString &name, const QColor &color, const QString &imagePath);
-    // Emitted on a single click/press so MediaLibraryPanel can forward
-    // it up to OperatorWindow's Item Preview panel, without committing
-    // anything to the schedule -- mirrors how clicking a Schedule row
-    // stages Preview without going live.
-    void previewRequested(const QString &name, const QColor &color, const QString &imagePath);
+    void activated(const QString &name, const QColor &color);
+    // Emitted on a single click/press so the preview pane can update
+    // without committing anything to the schedule -- mirrors how
+    // clicking a Schedule row stages Preview without going live.
+    void previewRequested(const QString &name, const QColor &color);
 
 protected:
     void mousePressEvent(QMouseEvent *event) override
     {
         QFrame::mousePressEvent(event);
-        if (m_interactive)
-            emit previewRequested(m_name, m_color, m_imagePath);
+        emit previewRequested(m_name, m_color);
     }
 
     void mouseDoubleClickEvent(QMouseEvent *event) override
     {
         QFrame::mouseDoubleClickEvent(event);
-        if (m_interactive)
-            emit activated(m_name, m_color, m_imagePath);
+        emit activated(m_name, m_color);
     }
 
 private:
     QString m_name;
     QColor m_color;
-    QString m_imagePath;
-    bool m_interactive;
 };
 
 } // namespace
@@ -142,61 +85,75 @@ MediaLibraryPanel::MediaLibraryPanel(QWidget *parent) : QWidget(parent)
 {
     auto *splitter = new QSplitter(this);
 
-    m_tree = new QTreeWidget(splitter);
-    m_tree->setHeaderHidden(true);
-    // Fixed (not just capped) width: the folder list only ever needs to
-    // show a couple of short names ("Videos", "Images"), so a generous
-    // flexible max just reserved dead space no content would ever fill
-    // -- that's what was showing up as a wide empty strip to the left of
-    // the grid. Fixed rather than a smaller max so the splitter can't
-    // decide to stretch it either.
-    m_tree->setFixedWidth(130);
-    buildFolderTree(m_tree);
-    connect(m_tree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *current, QTreeWidgetItem *) {
-        onTreeSelectionChanged(current);
-    });
-    splitter->addWidget(m_tree);
+    auto *tree = new QTreeWidget(splitter);
+    tree->setHeaderHidden(true);
+    tree->setMaximumWidth(200);
+    buildFolderTree(tree);
+    splitter->addWidget(tree);
 
-    m_stack = new QStackedWidget(splitter);
-    m_videosFolder = buildVideosFolder();
-    m_imagesFolder = buildImagesFolder();
-    m_stack->addWidget(m_videosFolder.page);
-    m_stack->addWidget(m_imagesFolder.page);
-    m_stack->setCurrentWidget(m_imagesFolder.page); // matches buildFolderTree()'s default selection
-    splitter->addWidget(m_stack);
+    // Item-preview pane: deliberately sits between the folder tree and
+    // the thumbnail grid, not off to one side, so it reads as "select on
+    // the left, see it big in the middle, browse more on the right."
+    // Shares the exact rendering pipeline (SlideRenderer + kDesignResolution
+    // + SlideCanvas) that the Schedule/Preview/Live panes use, so this is
+    // a pixel-faithful preview of how the item will actually appear once
+    // it's put on air -- not a separate, possibly-inconsistent mockup.
+    auto *previewWrapper = new QWidget(splitter);
+    auto *previewLayout = new QVBoxLayout(previewWrapper);
+    previewLayout->setContentsMargins(0, 0, 0, 0);
+    previewLayout->setSpacing(6);
 
-    // Tiles reflow to fill whatever width they're given -- see
-    // relayoutFolder() -- so each folder's scroll area needs to tell
-    // this panel when its available width actually changes (its own
-    // resizeEvent isn't enough: the QScrollArea can resize without its
-    // viewport's width changing, e.g. a scrollbar appearing/disappearing
-    // changes the split the other way).
-    m_imagesFolder.page->viewport()->installEventFilter(this);
-    m_videosFolder.page->viewport()->installEventFilter(this);
+    m_previewCanvas = new SlideCanvas(previewWrapper);
+    m_previewCanvas->setMinimumWidth(200);
+
+    m_previewLabel = new QLabel(tr("Select an item to preview"), previewWrapper);
+    m_previewLabel->setObjectName("nextSlideLabel");
+    m_previewLabel->setAlignment(Qt::AlignCenter);
+    m_previewLabel->setWordWrap(true);
+
+    previewLayout->addWidget(m_previewCanvas, /*stretch=*/1);
+    previewLayout->addWidget(m_previewLabel);
+    splitter->addWidget(previewWrapper);
+
+    onTilePreviewRequested(QString(), QColor()); // show an empty canvas until something is picked
+
+    auto *scrollArea = new QScrollArea(splitter);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setFrameShape(QFrame::NoFrame);
+
+    auto *gridHost = new QWidget(scrollArea);
+    m_grid = new QGridLayout(gridHost);
+    m_grid->setSpacing(12);
+    m_grid->setContentsMargins(12, 12, 12, 12);
+    m_grid->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+    buildThumbnailGrid(m_grid);
+    scrollArea->setWidget(gridHost);
+    splitter->addWidget(scrollArea);
 
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1);
-    // Same reasoning as OperatorWindow's Lower Area splitter: QSplitter
-    // only *honors* stretch factors on subsequent resizes, so without an
-    // explicit initial split, this splitter's first layout pass (before
-    // this panel has settled into its real width) can leave a big chunk
-    // of the pane's width completely unclaimed by either child. m_tree
-    // is a fixed width, so the second number here just needs to be
-    // "large enough that it's obviously the remainder" -- QSplitter
-    // clamps it to whatever's actually left over.
-    splitter->setSizes({130, 5000});
+    splitter->setStretchFactor(2, 1);
 
-    auto *layout = new QVBoxLayout(this);
+    auto *layout = new QHBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(6);
-    layout->addWidget(splitter, /*stretch=*/1);
-    layout->addWidget(buildBottomBar());
+    layout->addWidget(splitter);
+}
 
-    // Restore anything imported in a previous session. Deliberately
-    // last: buildBottomBar() needs to exist first since addTile() (via
-    // loadPersistedMedia()) calls refreshItemCount(), which touches
-    // m_itemCountLabel.
-    loadPersistedMedia();
+void MediaLibraryPanel::onTilePreviewRequested(const QString &name, const QColor &color)
+{
+    if (!color.isValid()) {
+        m_previewCanvas->setPixmap(SlideRenderer::render(nullptr, kDesignResolution));
+        m_previewLabel->setText(tr("Select an item to preview"));
+        return;
+    }
+
+    // Preview with an empty text body, matching exactly what
+    // onMediaActivated() actually adds to the schedule (a slide with
+    // this color as its background and no text) -- so what's shown here
+    // never diverges from what double-clicking would produce.
+    const Slide previewSlide(name, QString(), color);
+    m_previewCanvas->setPixmap(SlideRenderer::render(&previewSlide, kDesignResolution));
+    m_previewLabel->setText(name);
 }
 
 void MediaLibraryPanel::buildFolderTree(QTreeWidget *tree)
@@ -205,35 +162,24 @@ void MediaLibraryPanel::buildFolderTree(QTreeWidget *tree)
     // backing feature for any of them yet (no live feed ingestion, no
     // disc playback, no countdown timers, no audio playback, no saved
     // collections), so listing them would just be decoration pretending
-    // to be functionality. Videos and Images are real, separate
-    // collections (see this class's own doc comment for why they're
-    // kept structurally apart rather than sharing one grid).
-    auto *videosItem = new QTreeWidgetItem(tree, {tr("Videos")});
-    auto *imagesItem = new QTreeWidgetItem(tree, {tr("Images")});
-    Q_UNUSED(videosItem);
-    tree->setCurrentItem(imagesItem);
+    // to be functionality. Videos stays as a visible placeholder folder
+    // (no video import yet either, but it's the very next roadmap item
+    // media-wise) and Images is the one folder with real content.
+    const QStringList folders = {
+        tr("Videos"), tr("Images"),
+    };
+    QTreeWidgetItem *imagesItem = nullptr;
+    for (const QString &folder : folders) {
+        auto *item = new QTreeWidgetItem(tree, {folder});
+        if (folder == tr("Images"))
+            imagesItem = item;
+    }
+    if (imagesItem)
+        tree->setCurrentItem(imagesItem);
 }
 
-MediaLibraryPanel::MediaFolder MediaLibraryPanel::buildImagesFolder()
+void MediaLibraryPanel::buildThumbnailGrid(QGridLayout *grid)
 {
-    MediaFolder folder;
-    auto *scrollArea = new QScrollArea(m_stack);
-    scrollArea->setWidgetResizable(true);
-    scrollArea->setFrameShape(QFrame::NoFrame);
-
-    auto *gridHost = new QWidget(scrollArea);
-    folder.grid = new QGridLayout(gridHost);
-    folder.grid->setSpacing(12);
-    folder.grid->setContentsMargins(12, 12, 12, 12);
-    folder.grid->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-    scrollArea->setWidget(gridHost);
-    folder.page = scrollArea;
-
-    // A small built-in set of solid-color swatches standing in for a
-    // real image library (see README roadmap). These have no file
-    // behind them, so they're added with an empty image path -- addTile()
-    // treats that as "use the color directly", same as any imported
-    // photo would fall back to if its file somehow failed to load.
     struct Swatch { const char *name; const char *hex; };
     static const Swatch swatches[] = {
         {"Beach Sunset", "#e08a3c"},
@@ -243,280 +189,19 @@ MediaLibraryPanel::MediaFolder MediaLibraryPanel::buildImagesFolder()
         {"Yellow Sky", "#d4a72c"},
         {"Sun and Clouds", "#b8c9d6"},
     };
-    for (const Swatch &swatch : swatches)
-        addTile(folder, tr(swatch.name), QColor(swatch.hex), QString(), /*interactive=*/true);
 
-    return folder;
-}
-
-MediaLibraryPanel::MediaFolder MediaLibraryPanel::buildVideosFolder()
-{
-    // Starts empty -- no built-in placeholders, since a fake solid-color
-    // "video" swatch would be actively misleading about what video
-    // support currently is (nothing yet; see README roadmap).
-    MediaFolder folder;
-    auto *scrollArea = new QScrollArea(m_stack);
-    scrollArea->setWidgetResizable(true);
-    scrollArea->setFrameShape(QFrame::NoFrame);
-
-    auto *gridHost = new QWidget(scrollArea);
-    folder.grid = new QGridLayout(gridHost);
-    folder.grid->setSpacing(12);
-    folder.grid->setContentsMargins(12, 12, 12, 12);
-    folder.grid->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-    scrollArea->setWidget(gridHost);
-    folder.page = scrollArea;
-    return folder;
-}
-
-QWidget *MediaLibraryPanel::buildBottomBar()
-{
-    // Mirrors the reference status bar: "+" and a settings button on the
-    // left, the live item count centered, a view-options button on the
-    // right. All four widgets are real Qt controls -- Settings and View
-    // are honest disabled stubs (no backing feature yet, same pattern as
-    // Transcription/Profiles elsewhere in this app) rather than buttons
-    // that look clickable but silently do nothing.
-    m_addButton = new QToolButton(this);
-    m_addButton->setText(tr("+"));
-    m_addButton->setAutoRaise(true);
-    connect(m_addButton, &QToolButton::clicked, this, &MediaLibraryPanel::onAddButtonClicked);
-
-    auto *settingsButton = new QToolButton(this);
-    settingsButton->setText(tr("\u2699"));
-    settingsButton->setAutoRaise(true);
-    settingsButton->setEnabled(false);
-    settingsButton->setToolTip(tr("Media settings aren't implemented yet -- see the roadmap in README.md."));
-
-    auto *viewButton = new QToolButton(this);
-    viewButton->setText(tr("\u25A6"));
-    viewButton->setAutoRaise(true);
-    viewButton->setEnabled(false);
-    viewButton->setToolTip(tr("View options aren't implemented yet -- see the roadmap in README.md."));
-
-    m_itemCountLabel = new QLabel(this);
-    m_itemCountLabel->setObjectName("nextSlideLabel");
-    m_itemCountLabel->setAlignment(Qt::AlignCenter);
-
-    auto *bar = new QWidget(this);
-    auto *layout = new QHBoxLayout(bar);
-    layout->setContentsMargins(4, 0, 4, 0);
-    layout->addWidget(m_addButton);
-    layout->addWidget(settingsButton);
-    layout->addStretch(1);
-    layout->addWidget(m_itemCountLabel);
-    layout->addStretch(1);
-    layout->addWidget(viewButton);
-
-    refreshItemCount();
-    return bar;
-}
-
-bool MediaLibraryPanel::isVideosFolderSelected() const
-{
-    return m_tree->currentItem() && m_tree->currentItem()->text(0) == tr("Videos");
-}
-
-void MediaLibraryPanel::onTreeSelectionChanged(QTreeWidgetItem *current)
-{
-    if (!current)
-        return;
-    m_stack->setCurrentWidget(current->text(0) == tr("Videos") ? m_videosFolder.page : m_imagesFolder.page);
-    m_addButton->setToolTip(current->text(0) == tr("Videos") ? tr("Add a video file") : tr("Add an image file"));
-    refreshItemCount();
-}
-
-void MediaLibraryPanel::onAddButtonClicked()
-{
-    // No "what kind of file?" menu -- the currently-selected folder
-    // already answers that (see this class's own doc comment for why
-    // Videos and Images are kept as separate collections rather than
-    // one grid with a type picker on import).
-    if (isVideosFolderSelected()) {
-        const QString path = QFileDialog::getOpenFileName(
-            this, tr("Add Video"), QString(), tr(kSupportedVideoFilter),
-            nullptr, QFileDialog::DontUseNativeDialog);
-        if (path.isEmpty())
-            return;
-        // No thumbnail, no image path: no decoder wired in yet (see
-        // README roadmap). Not interactive: see MediaTile's doc comment
-        // on why a video tile shouldn't pretend clicking it means
-        // something yet.
-        const QString name = QFileInfo(path).completeBaseName();
-        addTile(m_videosFolder, name, QColor("#3a3f4b"), QString(), /*interactive=*/false);
-        // The video tile itself carries no imagePath (no decoder yet --
-        // see MediaTile's doc comment), but the *catalog* still needs
-        // the real file path, or there'd be nothing to reload next
-        // launch. That path lives only here, not on the tile.
-        persistImportedMedia(name, path, /*isVideo=*/true);
-        return;
-    }
-
-    const QString path = QFileDialog::getOpenFileName(
-        this, tr("Add Image"), QString(), tr(kSupportedImageFilter),
-        nullptr, QFileDialog::DontUseNativeDialog);
-    if (path.isEmpty())
-        return;
-
-    if (QPixmap(path).isNull())
-        return; // not a decodable image -- fail quietly rather than adding a broken tile
-
-    // The real file path travels with this tile from here on -- into
-    // its thumbnail, into previewRequested()/mediaActivated(), and from
-    // there into Slide::backgroundImagePath, so what the operator
-    // browses, previews, and puts live is the same actual photo, not a
-    // color approximation of it. The color here is only a fallback for
-    // the rare case the file becomes unreadable later (moved/deleted
-    // after import) -- not what's actually shown day to day.
-    const QString name = QFileInfo(path).completeBaseName();
-    addTile(m_imagesFolder, name, QColor("#3a3f4b"), path, /*interactive=*/true);
-    persistImportedMedia(name, path, /*isVideo=*/false);
-}
-
-void MediaLibraryPanel::addTile(MediaFolder &folder, const QString &name, const QColor &color,
-                                 const QString &imagePath, bool interactive)
-{
-    MediaTile *tile = imagePath.isEmpty()
-                           ? new MediaTile(name, color, QPixmap(), QString(), interactive)
-                           : new MediaTile(name, color, QPixmap(imagePath), imagePath, interactive);
-    connect(tile, &MediaTile::activated, this, &MediaLibraryPanel::mediaActivated);
-    connect(tile, &MediaTile::previewRequested, this, &MediaLibraryPanel::previewRequested);
-    folder.tiles.append(tile);
-    relayoutFolder(folder);
-    refreshItemCount();
-}
-
-void MediaLibraryPanel::relayoutFolder(MediaFolder &folder)
-{
-    // Tiles stretch to fill whatever width they're given, rather than
-    // sitting at a fixed size and leaving the remainder of the row
-    // empty -- that leftover space (worse the wider the panel) was
-    // exactly the "unnecessary space" complaint. minTileWidth is used
-    // only as the *minimum* comfortable width when deciding how many
-    // columns fit; every tile in a row is then stretched to share the
-    // full available width evenly, so the grid always ends flush with
-    // the right edge. Called both when a tile is added and (via the
-    // viewport event filter installed in the constructor) whenever that
-    // width changes.
-    constexpr int minTileWidth = 90;
-    constexpr int spacing = 12;
-    constexpr int margins = 12 * 2;
-
-    if (folder.tiles.isEmpty() || !folder.page)
-        return;
-
-    const int available = folder.page->viewport()->width() - margins;
-    const int columns = qMax(1, (available + spacing) / (minTileWidth + spacing));
-    const int tileWidth = (available - (columns - 1) * spacing) / columns;
-
-    // Detach every tile from the grid without deleting the tiles
-    // themselves (takeAt() hands back ownership of the QLayoutItem
-    // wrapper, not the widget -- that wrapper is what actually needs
-    // deleting here).
-    while (QLayoutItem *item = folder.grid->takeAt(0))
-        delete item;
-
-    for (int i = 0; i < folder.tiles.size(); ++i) {
-        folder.tiles[i]->setFixedWidth(tileWidth);
-        folder.grid->addWidget(folder.tiles[i], i / columns, i % columns);
-    }
-}
-
-bool MediaLibraryPanel::eventFilter(QObject *watched, QEvent *event)
-{
-    if (event->type() == QEvent::Resize) {
-        if (m_imagesFolder.page && watched == m_imagesFolder.page->viewport())
-            relayoutFolder(m_imagesFolder);
-        else if (m_videosFolder.page && watched == m_videosFolder.page->viewport())
-            relayoutFolder(m_videosFolder);
-    }
-    return QWidget::eventFilter(watched, event);
-}
-
-void MediaLibraryPanel::loadPersistedMedia()
-{
-    QString errorMessage;
-    if (!MediaLibraryStore::load(MediaLibraryStore::defaultStorePath(), &m_importedEntries, &errorMessage)) {
-        // A corrupt/unreadable manifest shouldn't take the whole Media
-        // tab down with it -- start this session with an empty imported
-        // catalog (built-ins still work) and let the operator re-import
-        // if needed, same "fail quietly" spirit as a bad image file in
-        // onAddButtonClicked().
-        qWarning() << "MediaLibraryPanel: failed to load media library:" << errorMessage;
-        m_importedEntries.clear();
-        return;
-    }
-
-    // Files can vanish between sessions (moved, deleted, a USB stick
-    // that isn't plugged in today) -- don't add a tile promising a
-    // preview/live render that would just fail, and don't keep re-
-    // offering a phantom entry forever. Rebuild the list to only what's
-    // still actually there, and rewrite the store if anything changed.
-    QVector<MediaLibraryStore::Entry> stillPresent;
-    stillPresent.reserve(m_importedEntries.size());
-    for (const MediaLibraryStore::Entry &entry : std::as_const(m_importedEntries)) {
-        if (!QFileInfo::exists(entry.filePath)) {
-            qWarning() << "MediaLibraryPanel: dropping missing media file from library:" << entry.filePath;
-            continue;
+    constexpr int columns = 3;
+    int row = 0, col = 0;
+    for (const Swatch &swatch : swatches) {
+        auto *tile = new MediaTile(tr(swatch.name), QColor(swatch.hex));
+        connect(tile, &MediaTile::activated, this, &MediaLibraryPanel::mediaActivated);
+        connect(tile, &MediaTile::previewRequested, this, &MediaLibraryPanel::onTilePreviewRequested);
+        grid->addWidget(tile, row, col);
+        if (++col >= columns) {
+            col = 0;
+            ++row;
         }
-
-        if (entry.kind == MediaLibraryStore::MediaKind::Video) {
-            addTile(m_videosFolder, entry.name, QColor("#3a3f4b"), QString(), /*interactive=*/false);
-        } else {
-            if (QPixmap(entry.filePath).isNull()) {
-                // Same file exists but isn't decodable anymore (e.g.
-                // corrupted) -- treat like the missing-file case above
-                // rather than adding a broken tile.
-                qWarning() << "MediaLibraryPanel: dropping undecodable image from library:" << entry.filePath;
-                continue;
-            }
-            addTile(m_imagesFolder, entry.name, QColor("#3a3f4b"), entry.filePath, /*interactive=*/true);
-        }
-        stillPresent.append(entry);
     }
-
-    if (stillPresent.size() != m_importedEntries.size()) {
-        m_importedEntries = stillPresent;
-        QString saveError;
-        if (!MediaLibraryStore::save(m_importedEntries, MediaLibraryStore::defaultStorePath(), &saveError))
-            qWarning() << "MediaLibraryPanel: failed to prune media library:" << saveError;
-    } else {
-        m_importedEntries = stillPresent;
-    }
-}
-
-void MediaLibraryPanel::persistImportedMedia(const QString &name, const QString &filePath, bool isVideo)
-{
-    m_importedEntries.append(MediaLibraryStore::Entry(
-        name, filePath, isVideo ? MediaLibraryStore::MediaKind::Video : MediaLibraryStore::MediaKind::Image));
-
-    QString errorMessage;
-    if (!MediaLibraryStore::save(m_importedEntries, MediaLibraryStore::defaultStorePath(), &errorMessage)) {
-        // The tile is already on screen and usable for the rest of this
-        // session either way -- a save failure just means it won't
-        // survive to next launch. Log it rather than interrupting the
-        // operator with a dialog mid-import.
-        qWarning() << "MediaLibraryPanel: failed to save media library:" << errorMessage;
-    }
-}
-
-void MediaLibraryPanel::refreshItemCount()
-{
-    // Called from addTile(), which buildImagesFolder() calls while the
-    // constructor is still assembling the tree+grid splitter -- before
-    // buildBottomBar() (and therefore m_itemCountLabel) exists. Guard
-    // rather than reorder construction, since buildBottomBar() also
-    // calls this once at the end to set the initial count correctly.
-    if (!m_itemCountLabel)
-        return;
-
-    // Read live off whichever folder's grid is currently showing, never
-    // tracked separately, so this can never drift out of sync with
-    // what's actually on screen -- and so switching folders updates the
-    // count to match without any extra bookkeeping.
-    const QGridLayout *currentGrid = isVideosFolderSelected() ? m_videosFolder.grid : m_imagesFolder.grid;
-    const int count = currentGrid ? currentGrid->count() : 0;
-    m_itemCountLabel->setText(tr("%n item(s)", "", count));
 }
 
 #include "MediaLibraryPanel.moc"
