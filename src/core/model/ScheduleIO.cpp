@@ -22,6 +22,8 @@ bool saveToFile(const QVector<Slide> &slides, const QString &path, QString *erro
         obj["label"] = slide.label;
         obj["text"] = slide.text;
         obj["background"] = slide.background.name(QColor::HexArgb);
+        if (!slide.backgroundImagePath.isEmpty())
+            obj["backgroundImagePath"] = slide.backgroundImagePath;
         slidesArray.append(obj);
     }
 
@@ -86,7 +88,8 @@ bool loadFromFile(const QString &path, QVector<Slide> *outSlides, QString *error
             background = Qt::black;
         slides.append(Slide(obj.value("label").toString(),
                              obj.value("text").toString(),
-                             background));
+                             background,
+                             obj.value("backgroundImagePath").toString()));
     }
 
     *outSlides = slides;
