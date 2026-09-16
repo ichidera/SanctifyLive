@@ -1,5 +1,6 @@
 #include "ui/MediaLibraryPanel.h"
 
+#include <QDebug>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
@@ -14,6 +15,8 @@
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+
+#include "core/storage/MediaLibraryStore.h"
 
 namespace
 {
@@ -163,6 +166,12 @@ MediaLibraryPanel::MediaLibraryPanel(QWidget *parent) : QWidget(parent)
     layout->setSpacing(6);
     layout->addWidget(splitter, /*stretch=*/1);
     layout->addWidget(buildBottomBar());
+
+    // Restore anything imported in a previous session. Deliberately
+    // last: buildBottomBar() needs to exist first since addTile() (via
+    // loadPersistedMedia()) calls refreshItemCount(), which touches
+    // m_itemCountLabel.
+    loadPersistedMedia();
 }
 
 void MediaLibraryPanel::buildFolderTree(QTreeWidget *tree)
@@ -308,7 +317,13 @@ void MediaLibraryPanel::onAddButtonClicked()
         // README roadmap). Not interactive: see MediaTile's doc comment
         // on why a video tile shouldn't pretend clicking it means
         // something yet.
-        addTile(m_videosFolder, QFileInfo(path).completeBaseName(), QColor("#3a3f4b"), QString(), /*interactive=*/false);
+        const QString name = QFileInfo(path).completeBaseName();
+        addTile(m_videosFolder, name, QColor("#3a3f4b"), QString(), /*interactive=*/false);
+        // The video tile itself carries no imagePath (no decoder yet --
+        // see MediaTile's doc comment), but the *catalog* still needs
+        // the real file path, or there'd be nothing to reload next
+        // launch. That path lives only here, not on the tile.
+        persistImportedMedia(name, path, /*isVideo=*/true);
         return;
     }
 
@@ -328,7 +343,76 @@ void MediaLibraryPanel::onAddButtonClicked()
     // color approximation of it. The color here is only a fallback for
     // the rare case the file becomes unreadable later (moved/deleted
     // after import) -- not what's actually shown day to day.
-    addTile(m_imagesFolder, QFileInfo(path).completeBaseName(), QColor("#3a3f4b"), path, /*interactive=*/true);
+    const QString name = QFileInfo(path).completeBaseName();
+    addTile(m_imagesFolder, name, QColor("#3a3f4b"), path, /*interactive=*/true);
+    persistImportedMedia(name, path, /*isVideo=*/false);
+}
+
+void MediaLibraryPanel::loadPersistedMedia()
+{
+    QString errorMessage;
+    if (!MediaLibraryStore::load(MediaLibraryStore::defaultStorePath(), &m_importedEntries, &errorMessage)) {
+        // A corrupt/unreadable manifest shouldn't take the whole Media
+        // tab down with it -- start this session with an empty imported
+        // catalog (built-ins still work) and let the operator re-import
+        // if needed, same "fail quietly" spirit as a bad image file in
+        // onAddButtonClicked().
+        qWarning() << "MediaLibraryPanel: failed to load media library:" << errorMessage;
+        m_importedEntries.clear();
+        return;
+    }
+
+    // Files can vanish between sessions (moved, deleted, a USB stick
+    // that isn't plugged in today) -- don't add a tile promising a
+    // preview/live render that would just fail, and don't keep re-
+    // offering a phantom entry forever. Rebuild the list to only what's
+    // still actually there, and rewrite the store if anything changed.
+    QVector<MediaLibraryStore::Entry> stillPresent;
+    stillPresent.reserve(m_importedEntries.size());
+    for (const MediaLibraryStore::Entry &entry : std::as_const(m_importedEntries)) {
+        if (!QFileInfo::exists(entry.filePath)) {
+            qWarning() << "MediaLibraryPanel: dropping missing media file from library:" << entry.filePath;
+            continue;
+        }
+
+        if (entry.kind == MediaLibraryStore::MediaKind::Video) {
+            addTile(m_videosFolder, entry.name, QColor("#3a3f4b"), QString(), /*interactive=*/false);
+        } else {
+            if (QPixmap(entry.filePath).isNull()) {
+                // Same file exists but isn't decodable anymore (e.g.
+                // corrupted) -- treat like the missing-file case above
+                // rather than adding a broken tile.
+                qWarning() << "MediaLibraryPanel: dropping undecodable image from library:" << entry.filePath;
+                continue;
+            }
+            addTile(m_imagesFolder, entry.name, QColor("#3a3f4b"), entry.filePath, /*interactive=*/true);
+        }
+        stillPresent.append(entry);
+    }
+
+    if (stillPresent.size() != m_importedEntries.size()) {
+        m_importedEntries = stillPresent;
+        QString saveError;
+        if (!MediaLibraryStore::save(m_importedEntries, MediaLibraryStore::defaultStorePath(), &saveError))
+            qWarning() << "MediaLibraryPanel: failed to prune media library:" << saveError;
+    } else {
+        m_importedEntries = stillPresent;
+    }
+}
+
+void MediaLibraryPanel::persistImportedMedia(const QString &name, const QString &filePath, bool isVideo)
+{
+    m_importedEntries.append(MediaLibraryStore::Entry(
+        name, filePath, isVideo ? MediaLibraryStore::MediaKind::Video : MediaLibraryStore::MediaKind::Image));
+
+    QString errorMessage;
+    if (!MediaLibraryStore::save(m_importedEntries, MediaLibraryStore::defaultStorePath(), &errorMessage)) {
+        // The tile is already on screen and usable for the rest of this
+        // session either way -- a save failure just means it won't
+        // survive to next launch. Log it rather than interrupting the
+        // operator with a dialog mid-import.
+        qWarning() << "MediaLibraryPanel: failed to save media library:" << errorMessage;
+    }
 }
 
 void MediaLibraryPanel::addTile(MediaFolder &folder, const QString &name, const QColor &color,

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(SanctifyLive VERSION 0.2.2 LANGUAGES CXX)
+project(SanctifyLive VERSION 0.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,12 +13,16 @@ set(CMAKE_AUTOUIC ON)
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
 # src/ is split by responsibility, not just alphabetically:
-#   core/model/  - plain data + state (Slide, ScheduleModel) and file I/O
-#                  for it (ScheduleIO). No Qt widgets, no rendering. Safe
-#                  to reuse from a future headless/CLI mode.
-#   core/render/ - turns model data into pixels (SlideRenderer, the
-#                  design-resolution contract). No knowledge of physical
-#                  windows.
+#   core/model/   - plain data + state (Slide, ScheduleModel) and file I/O
+#                   for it (ScheduleIO). No Qt widgets, no rendering. Safe
+#                   to reuse from a future headless/CLI mode.
+#   core/storage/ - persistence for app-level state that isn't a Slide
+#                   schedule (MediaLibraryStore remembers imported media
+#                   across relaunches). Same no-Qt-widgets rule as
+#                   core/model/.
+#   core/render/  - turns model data into pixels (SlideRenderer, the
+#                   design-resolution contract). No knowledge of physical
+#                   windows.
 #   ui/          - Qt widgets that display things and take input
 #                  (OperatorWindow, OutputWindow, SlideCanvas,
 #                  MediaLibraryPanel, Theme). No slide-drawing logic of
@@ -39,6 +43,9 @@ add_executable(SanctifyLive
     src/core/model/ScheduleModel.cpp
     src/core/model/ScheduleIO.h
     src/core/model/ScheduleIO.cpp
+
+    src/core/storage/MediaLibraryStore.h
+    src/core/storage/MediaLibraryStore.cpp
 
     src/core/render/RenderResolution.h
     src/core/render/SlideRenderer.h

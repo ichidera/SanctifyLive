@@ -1,7 +1,10 @@
 #pragma once
 
 #include <QColor>
+#include <QVector>
 #include <QWidget>
+
+#include "core/storage/MediaLibraryStore.h"
 
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -101,10 +104,32 @@ private:
     void refreshItemCount();
     bool isVideosFolderSelected() const;
 
+    // Restores previously-imported (real file) tiles from
+    // MediaLibraryStore, called once from the constructor after the
+    // built-in Images swatches exist. Entries whose file no longer
+    // exists (moved/deleted since last run) are silently dropped -- see
+    // MediaLibraryStore.h for why that's the right call -- and the
+    // pruned list is written back so the store doesn't keep growing
+    // stale rows forever.
+    void loadPersistedMedia();
+
+    // Appends one imported item to the in-memory catalog and persists
+    // the whole catalog immediately. Called right after a successful
+    // import in onAddButtonClicked(); kept as its own step (rather than
+    // folded into addTile(), which built-in swatches also use) so
+    // swatches never get written to disk as if they were real files.
+    void persistImportedMedia(const QString &name, const QString &filePath, bool isVideo);
+
     QTreeWidget *m_tree = nullptr;
     QStackedWidget *m_stack = nullptr;
     MediaFolder m_imagesFolder;
     MediaFolder m_videosFolder;
     QLabel *m_itemCountLabel = nullptr;
     QToolButton *m_addButton = nullptr;
+
+    // The in-memory mirror of what's on disk in MediaLibraryStore --
+    // built-in swatches are NOT in here, only real imported files. Kept
+    // around (rather than re-reading the file on every import) so
+    // persistImportedMedia() can append-and-rewrite in one step.
+    QVector<MediaLibraryStore::Entry> m_importedEntries;
 };

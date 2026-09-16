@@ -84,7 +84,15 @@ Current milestone:
   planned to need real VLC/FFmpeg-level work down the line. Settings and
   View are honest disabled stubs, same pattern as Transcription/
   Profiles. The item count reflects whichever folder is currently
-  showing, read live off its grid, never hardcoded.
+  showing, read live off its grid, never hardcoded. **Imports persist
+  across restarts** (`core/storage/MediaLibraryStore`): the catalog of
+  what's been imported (name, file path, kind) is saved to a small JSON
+  file in the app's data directory and reloaded on next launch, so
+  opening SanctifyLive doesn't reset the library back to just the
+  built-in swatches. Files themselves are referenced from wherever the
+  operator picked them, not copied into app storage; if a remembered
+  file has since moved or been deleted, it's dropped from the library on
+  load (with a warning logged) instead of showing a broken tile.
 
 Deliberately absent for now (see [Roadmap](#roadmap)): song/Scripture
 databases, real media import, themes, multi-layer composition, live
