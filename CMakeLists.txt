@@ -10,7 +10,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL)
 
 # src/ is split by responsibility, not just alphabetically:
 #   core/model/   - plain data + state (Slide, ScheduleModel) and file I/O
@@ -27,6 +27,19 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 #   core/render/  - turns model data into pixels (SlideRenderer, the
 #                   design-resolution contract). No knowledge of physical
 #                   windows.
+#   hardware/    - HardwareProbe/TierScorer/FeaturePreset/HardwareSettings:
+#                  measures the machine SanctifyLive is running on (CPU/
+#                  RAM/GPU), classifies it into a HardwareTier, and
+#                  persists the result. A top-level sibling of core/
+#                  (not nested under it) because it isn't slide/schedule
+#                  data -- it's a different kind of "state the app needs
+#                  regardless of UI", same no-Qt-widgets rule. Currently
+#                  invisible: main.cpp calls it once at startup purely to
+#                  detect/log/persist the tier; nothing reads the result
+#                  back yet. It exists so a future compositor, transition
+#                  system, or thumbnail pipeline has one place to ask
+#                  "what can this machine handle" instead of assuming
+#                  every machine can do motion backgrounds and live video.
 #   ui/          - Qt widgets that display things and take input
 #                  (OperatorWindow, OutputWindow, SlideCanvas,
 #                  MediaLibraryPanel, ScripturePanel, Theme). No
@@ -61,6 +74,16 @@ add_executable(SanctifyLive
     src/core/render/SlideRenderer.h
     src/core/render/SlideRenderer.cpp
 
+    src/hardware/HardwareProfile.h
+    src/hardware/HardwareProbe.h
+    src/hardware/HardwareProbe.cpp
+    src/hardware/FeaturePreset.h
+    src/hardware/FeaturePreset.cpp
+    src/hardware/TierScorer.h
+    src/hardware/TierScorer.cpp
+    src/hardware/HardwareSettings.h
+    src/hardware/HardwareSettings.cpp
+
     src/ui/Theme.h
     src/ui/Theme.cpp
     src/ui/SlideCanvas.h
@@ -81,7 +104,7 @@ add_executable(SanctifyLive
 
 target_include_directories(SanctifyLive PRIVATE src)
 
-target_link_libraries(SanctifyLive PRIVATE Qt6::Widgets)
+target_link_libraries(SanctifyLive PRIVATE Qt6::Widgets Qt6::OpenGL)
 
 # Keep warnings visible during early development rather than silencing them.
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
