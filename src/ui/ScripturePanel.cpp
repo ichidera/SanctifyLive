@@ -1,19 +1,26 @@
 #include "ui/ScripturePanel.h"
 
+#include <algorithm>
+
 #include <QAbstractTableModel>
+#include <QButtonGroup>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QItemSelectionModel>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QLocale>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QRegularExpression>
+#include <QSignalBlocker>
 #include <QTableView>
 #include <QToolButton>
 #include <QVBoxLayout>
 
 #include "core/scripture/ScriptureLibrary.h"
+#include "ui/Theme.h"
 
 // ScriptureTableModel is a thin QAbstractTableModel wrapper around
 // ScriptureLibrary::verses() -- Translation / Reference / Scripture
@@ -24,6 +31,15 @@
 // unnamed namespace, since it needs no Q_OBJECT (no signals/slots/
 // properties of its own) and is only ever touched through a pointer
 // outside this file.
+//
+// Supports an optional keyword filter (Words search mode): when set,
+// the model shows only matching verses, and every row index the view
+// deals in is a VIEW row into that filtered subset -- sourceRow()/
+// viewRowForSourceRow() are the two directions of translating between
+// a view row and the corresponding index into
+// ScriptureLibrary::verses() (the "source" row). When no filter is
+// active the two are identical, which is the common case (Reference
+// mode always browses the unfiltered list -- see ScripturePanel).
 class ScriptureTableModel : public QAbstractTableModel
 {
 public:
@@ -50,13 +66,25 @@ public:
         m_enabled = enabled;
         endResetModel();
     }
-    bool isEnabled() const { return m_enabled; }
+
+    // words are ANDed together (case-insensitive substring match) --
+    // a verse must contain every word to match. An empty list clears
+    // filtering entirely (full, unfiltered translation).
+    void setKeywordFilter(const QStringList &words)
+    {
+        beginResetModel();
+        m_filterWords = words;
+        rebuildFilteredRows();
+        endResetModel();
+    }
+    void clearKeywordFilter() { setKeywordFilter({}); }
+    bool isFiltering() const { return !m_filterWords.isEmpty(); }
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override
     {
-        if (parent.isValid())
+        if (parent.isValid() || !m_enabled)
             return 0;
-        return m_enabled ? ScriptureLibrary::verses().size() : 0;
+        return isFiltering() ? m_filteredRows.size() : ScriptureLibrary::verses().size();
     }
 
     int columnCount(const QModelIndex &parent = QModelIndex()) const override
@@ -68,19 +96,16 @@ public:
     {
         if (!index.isValid() || role != Qt::DisplayRole)
             return QVariant();
-
-        const QVector<ScriptureVerse> &all = ScriptureLibrary::verses();
-        if (index.row() < 0 || index.row() >= all.size())
+        const ScriptureVerse *verse = verseAt(index.row());
+        if (!verse)
             return QVariant();
-        const ScriptureVerse &verse = all.at(index.row());
-
         switch (index.column()) {
         case ColumnTranslation:
             return ScriptureLibrary::translationCode();
         case ColumnReference:
-            return verse.reference;
+            return verse->reference;
         case ColumnScripture:
-            return verse.text;
+            return verse->text;
         default:
             return QVariant();
         }
@@ -102,45 +127,131 @@ public:
         }
     }
 
-    // Row accessor for ScripturePanel's click/activate handlers, which
-    // need the real verse (reference + full text), not just whatever a
-    // particular column's data() call returns.
-    const ScriptureVerse *verseAt(int row) const
+    // Translates a view row (what the table/selection model deals in)
+    // to the corresponding row in ScriptureLibrary::verses(). -1 if out
+    // of range or nothing's enabled.
+    int sourceRow(int viewRow) const
     {
-        const QVector<ScriptureVerse> &all = ScriptureLibrary::verses();
-        if (row < 0 || row >= all.size())
-            return nullptr;
-        return &all.at(row);
+        if (!m_enabled)
+            return -1;
+        if (!isFiltering())
+            return (viewRow >= 0 && viewRow < ScriptureLibrary::verses().size()) ? viewRow : -1;
+        if (viewRow < 0 || viewRow >= m_filteredRows.size())
+            return -1;
+        return m_filteredRows.at(viewRow);
     }
 
-    // Finds the first verse whose reference starts with `query`
-    // (case-insensitive), falling back to "contains" on the reference,
-    // then "contains" on the verse text itself -- so typing a full or
-    // partial reference ("Genesis 1:1", "gen 1") jumps straight there,
-    // while a plain word ("shepherd") still finds a matching verse
-    // rather than coming up empty. Returns -1 if nothing matches.
-    int findJumpRow(const QString &query) const
+    // The inverse of sourceRow(): which view row (if any) currently
+    // shows the given ScriptureLibrary::verses() row. Used to select
+    // and scroll to a verse resolved by Reference-mode parsing.
+    int viewRowForSourceRow(int sourceRow) const
     {
-        if (!m_enabled || query.trimmed().isEmpty())
+        if (!m_enabled || sourceRow < 0)
             return -1;
+        if (!isFiltering())
+            return sourceRow < ScriptureLibrary::verses().size() ? sourceRow : -1;
+        const auto it = std::lower_bound(m_filteredRows.begin(), m_filteredRows.end(), sourceRow);
+        if (it == m_filteredRows.end() || *it != sourceRow)
+            return -1;
+        return int(it - m_filteredRows.begin());
+    }
+
+    // Row accessor for ScripturePanel's selection handling, which needs
+    // the real verse (book/chapter/verse/text), not just whatever a
+    // particular column's data() call returns. Takes a VIEW row.
+    const ScriptureVerse *verseAt(int viewRow) const
+    {
+        const int src = sourceRow(viewRow);
+        const QVector<ScriptureVerse> &all = ScriptureLibrary::verses();
+        if (src < 0 || src >= all.size())
+            return nullptr;
+        return &all.at(src);
+    }
+
+    // Combines a set of SOURCE rows (i.e. already translated via
+    // sourceRow(), sorted, deduplicated) into one reference string and
+    // one text block -- the "compress into one slide unless multiple
+    // verses are selected" behavior. A single verse round-trips as
+    // itself. Multiple verses are grouped into runs of Bible-consecutive
+    // verses (same book, same chapter, verse numbers incrementing by
+    // exactly 1): a normal shift-click range comes out as "Esther
+    // 8:9-10"; a handful of unrelated Words-mode search hits still
+    // combine sensibly as "Esther 8:9; John 3:16" rather than silently
+    // pretending they're adjacent.
+    void combinedReferenceAndText(const QVector<int> &sourceRows, QString *outReference, QString *outText) const
+    {
+        outReference->clear();
+        outText->clear();
+        if (sourceRows.isEmpty())
+            return;
 
         const QVector<ScriptureVerse> &all = ScriptureLibrary::verses();
-        int containsReferenceMatch = -1;
-        int containsTextMatch = -1;
-        for (int i = 0; i < all.size(); ++i) {
-            const ScriptureVerse &verse = all.at(i);
-            if (verse.reference.startsWith(query, Qt::CaseInsensitive))
-                return i;
-            if (containsReferenceMatch < 0 && verse.reference.contains(query, Qt::CaseInsensitive))
-                containsReferenceMatch = i;
-            if (containsTextMatch < 0 && verse.text.contains(query, Qt::CaseInsensitive))
-                containsTextMatch = i;
+        QVector<const ScriptureVerse *> selected;
+        selected.reserve(sourceRows.size());
+        for (int row : sourceRows) {
+            if (row >= 0 && row < all.size())
+                selected.append(&all.at(row));
         }
-        return containsReferenceMatch >= 0 ? containsReferenceMatch : containsTextMatch;
+        if (selected.isEmpty())
+            return;
+
+        if (selected.size() == 1) {
+            *outReference = selected.first()->reference;
+            *outText = selected.first()->text;
+            return;
+        }
+
+        QStringList referenceParts;
+        QStringList textParts;
+        int runStart = 0;
+        for (int i = 1; i <= selected.size(); ++i) {
+            const bool continuesRun = i < selected.size() && selected.at(i)->book == selected.at(i - 1)->book
+                && selected.at(i)->chapter == selected.at(i - 1)->chapter
+                && selected.at(i)->verse == selected.at(i - 1)->verse + 1;
+            if (continuesRun)
+                continue;
+
+            const ScriptureVerse *first = selected.at(runStart);
+            const ScriptureVerse *last = selected.at(i - 1);
+            referenceParts << (runStart == i - 1 ? first->reference
+                                                  : QStringLiteral("%1 %2:%3-%4")
+                                                        .arg(first->book)
+                                                        .arg(first->chapter)
+                                                        .arg(first->verse)
+                                                        .arg(last->verse));
+            for (int j = runStart; j < i; ++j)
+                textParts << selected.at(j)->text;
+            runStart = i;
+        }
+        *outReference = referenceParts.join(QStringLiteral("; "));
+        *outText = textParts.join(QLatin1Char(' '));
     }
 
 private:
+    void rebuildFilteredRows()
+    {
+        m_filteredRows.clear();
+        if (m_filterWords.isEmpty())
+            return; // not filtering; rowCount()/sourceRow() use the full list directly
+
+        const QVector<ScriptureVerse> &all = ScriptureLibrary::verses();
+        m_filteredRows.reserve(all.size() / 8); // rough guess; grows if needed
+        for (int i = 0; i < all.size(); ++i) {
+            bool matchesAll = true;
+            for (const QString &word : std::as_const(m_filterWords)) {
+                if (!all.at(i).text.contains(word, Qt::CaseInsensitive)) {
+                    matchesAll = false;
+                    break;
+                }
+            }
+            if (matchesAll)
+                m_filteredRows.append(i);
+        }
+    }
+
     bool m_enabled = true;
+    QStringList m_filterWords;
+    QVector<int> m_filteredRows; // sorted ascending -- built by a single forward pass over verses()
 };
 
 ScripturePanel::ScripturePanel(QWidget *parent) : QWidget(parent)
@@ -149,8 +260,9 @@ ScripturePanel::ScripturePanel(QWidget *parent) : QWidget(parent)
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(8);
+    layout->setSpacing(6);
     layout->addWidget(buildSearchBar());
+    layout->addWidget(buildReferenceHintArea());
 
     auto *mainRow = new QHBoxLayout();
     mainRow->setContentsMargins(0, 0, 0, 0);
@@ -160,7 +272,10 @@ ScripturePanel::ScripturePanel(QWidget *parent) : QWidget(parent)
     m_table = new QTableView(this);
     m_table->setModel(m_model);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_table->setSelectionMode(QAbstractItemView::SingleSelection);
+    // Contiguous, not Extended: a slide is a run of consecutive verses,
+    // so ctrl-click-style discontiguous multi-select isn't offered --
+    // shift-click/shift-arrow/drag to extend a single range instead.
+    m_table->setSelectionMode(QAbstractItemView::ContiguousSelection);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->verticalHeader()->setVisible(false);
     m_table->horizontalHeader()->setStretchLastSection(true);
@@ -170,66 +285,113 @@ ScripturePanel::ScripturePanel(QWidget *parent) : QWidget(parent)
                                                        QHeaderView::ResizeToContents);
     m_table->setWordWrap(false);
     m_table->setShowGrid(false);
-    connect(m_table, &QTableView::clicked, this, &ScripturePanel::onRowClicked);
-    connect(m_table, &QTableView::activated, this, &ScripturePanel::onRowActivated);
-    connect(m_table, &QTableView::doubleClicked, this, &ScripturePanel::onRowActivated);
     mainRow->addWidget(m_table, /*stretch=*/1);
 
     layout->addLayout(mainRow, /*stretch=*/1);
     layout->addWidget(buildBottomBar());
 
-    // Land on Genesis 1:1, matching the target design, without firing
-    // previewRequested() -- construction time is before OperatorWindow
-    // has necessarily made this the active Content Tab, and Item
-    // Preview shouldn't jump to a verse just because this panel exists
-    // somewhere in the background. A real click/search does the same
-    // navigation later and DOES emit the signal.
+    // Land on Genesis 1:1, matching the target design, before any
+    // signals are wired up (see below) -- construction time is before
+    // OperatorWindow has necessarily made this the active Content Tab,
+    // and Item Preview shouldn't jump to a verse just because this
+    // panel exists somewhere in the background.
     if (m_model->rowCount() > 0)
         m_table->selectRow(0);
 
+    // All signal wiring is deliberately deferred to here, after every
+    // widget involved exists. Several handlers (mode toggle, search
+    // text, reset) touch m_table/m_model/m_hintLabel, and Qt fires
+    // toggled()/textChanged() synchronously for the initial widget
+    // state set above and in the build*() calls -- connecting earlier
+    // would run those handlers before their dependencies exist.
+    connect(m_wordsModeButton, &QToolButton::toggled, this, [this](bool checked) {
+        if (checked)
+            setMode(SearchMode::Words);
+    });
+    connect(m_referenceModeButton, &QToolButton::toggled, this, [this](bool checked) {
+        if (checked)
+            setMode(SearchMode::Reference);
+    });
+    connect(m_searchEdit, &QLineEdit::textChanged, this, &ScripturePanel::onSearchTextChanged);
+    connect(m_searchEdit, &QLineEdit::returnPressed, this, [this]() { emitForSelection(/*activate=*/true); });
+    connect(m_resetButton, &QToolButton::clicked, this, &ScripturePanel::onResetClicked);
+    connect(m_translationsList, &QListWidget::itemChanged, this, &ScripturePanel::onTranslationItemChanged);
+    connect(m_moreAvailableButton, &QPushButton::clicked, this, &ScripturePanel::onMoreAvailableClicked);
+    connect(m_table->selectionModel(), &QItemSelectionModel::selectionChanged, this,
+            [this](const QItemSelection &, const QItemSelection &) { emitForSelection(/*activate=*/false); });
+    connect(m_table, &QTableView::activated, this, [this](const QModelIndex &) { emitForSelection(/*activate=*/true); });
+    connect(m_table, &QTableView::doubleClicked, this,
+            [this](const QModelIndex &) { emitForSelection(/*activate=*/true); });
+
+    updateHintLabel(ScriptureReference::parse(m_searchEdit->text()));
     refreshReferenceCount();
 }
 
 QWidget *ScripturePanel::buildSearchBar()
 {
-    auto *bookPickerButton = new QToolButton(this);
-    bookPickerButton->setText(tr("\u2630")); // \u2630: trigram/list glyph, stands in for a future book/chapter picker
-    bookPickerButton->setAutoRaise(true);
-    bookPickerButton->setEnabled(false);
-    bookPickerButton->setToolTip(tr("Browsing by book/chapter isn't implemented yet -- search by reference below."));
+    m_wordsModeButton = new QToolButton(this);
+    m_wordsModeButton->setObjectName("modeToggleButton");
+    m_wordsModeButton->setText(tr("Words"));
+    m_wordsModeButton->setCheckable(true);
+    m_wordsModeButton->setToolTip(
+        tr("Search by words in the verse text, like a search engine -- e.g. \u201cLord is my shepherd\u201d."));
+
+    m_referenceModeButton = new QToolButton(this);
+    m_referenceModeButton->setObjectName("modeToggleButton");
+    m_referenceModeButton->setText(tr("Reference"));
+    m_referenceModeButton->setCheckable(true);
+    m_referenceModeButton->setChecked(true); // default mode, matches the target design's "Genesis 1:1" search box
+    m_referenceModeButton->setToolTip(
+        tr("Jump straight to a book, chapter, and verse -- e.g. \u201cJohn 3:16\u201d or \u201cJohn 3:16-18\u201d."));
+
+    auto *modeGroup = new QButtonGroup(this);
+    modeGroup->setExclusive(true);
+    modeGroup->addButton(m_wordsModeButton);
+    modeGroup->addButton(m_referenceModeButton);
 
     m_searchEdit = new QLineEdit(this);
-    m_searchEdit->setPlaceholderText(tr("Search by reference (e.g. \u201cGenesis 1:1\u201d) or scripture text\u2026"));
+    m_searchEdit->setPlaceholderText(tr("Book, chapter, verse\u2026 e.g. \u201cJohn 3:16\u201d"));
     m_searchEdit->setText(tr("Genesis 1:1"));
-    connect(m_searchEdit, &QLineEdit::textChanged, this, &ScripturePanel::onSearchTextChanged);
 
-    auto *optionsButton = new QToolButton(this);
-    optionsButton->setText(tr("\u2261"));
-    optionsButton->setAutoRaise(true);
-    optionsButton->setEnabled(false);
-    optionsButton->setToolTip(tr("Search options aren't implemented yet."));
-
-    auto *resetButton = new QToolButton(this);
-    resetButton->setText(tr("\u21BA")); // \u21BA: counterclockwise arrow, reads as "reset"
-    resetButton->setAutoRaise(true);
-    resetButton->setToolTip(tr("Clear the search box and jump back to the top of the list."));
-    connect(resetButton, &QToolButton::clicked, this, [this]() {
-        m_searchEdit->clear();
-        if (m_model->rowCount() > 0) {
-            m_table->selectRow(0);
-            m_table->scrollToTop();
-        }
-    });
+    m_resetButton = new QToolButton(this);
+    m_resetButton->setText(tr("\u21BA")); // counterclockwise arrow, reads as "reset"
+    m_resetButton->setAutoRaise(true);
+    m_resetButton->setToolTip(tr("Clear the search box and jump back to the top of the list."));
 
     auto *bar = new QWidget(this);
     auto *barLayout = new QHBoxLayout(bar);
     barLayout->setContentsMargins(0, 0, 0, 0);
     barLayout->setSpacing(4);
-    barLayout->addWidget(bookPickerButton);
+    barLayout->addWidget(m_wordsModeButton);
+    barLayout->addWidget(m_referenceModeButton);
     barLayout->addWidget(m_searchEdit, /*stretch=*/1);
-    barLayout->addWidget(optionsButton);
-    barLayout->addWidget(resetButton);
+    barLayout->addWidget(m_resetButton);
     return bar;
+}
+
+QWidget *ScripturePanel::buildReferenceHintArea()
+{
+    // Reference mode's "the app tells you what's valid next" feedback:
+    // a status line (current stage / valid range / error) plus, while
+    // the book is still ambiguous, a row of clickable book-name chips.
+    // Hidden entirely in Words mode, where neither applies.
+    m_hintLabel = new QLabel(this);
+    m_hintLabel->setObjectName("nextSlideLabel");
+    m_hintLabel->setWordWrap(true);
+
+    m_suggestionsRow = new QWidget(this);
+    m_suggestionsLayout = new QHBoxLayout(m_suggestionsRow);
+    m_suggestionsLayout->setContentsMargins(0, 0, 0, 0);
+    m_suggestionsLayout->setSpacing(6);
+    m_suggestionsRow->setVisible(false);
+
+    auto *container = new QWidget(this);
+    auto *containerLayout = new QVBoxLayout(container);
+    containerLayout->setContentsMargins(0, 0, 0, 0);
+    containerLayout->setSpacing(4);
+    containerLayout->addWidget(m_hintLabel);
+    containerLayout->addWidget(m_suggestionsRow);
+    return container;
 }
 
 QWidget *ScripturePanel::buildTranslationsColumn()
@@ -265,24 +427,22 @@ QWidget *ScripturePanel::buildTranslationsColumn()
     addTranslation(tr("HCSB"), /*available=*/false);
     addTranslation(tr("RVA"), /*available=*/false);
     m_translationsList->setCurrentItem(m_kjvItem);
-    connect(m_translationsList, &QListWidget::itemChanged, this, &ScripturePanel::onTranslationItemChanged);
 
     // A real link, not a disabled stub: clicking it is honest about
     // what it does today (explain where more translations will come
     // from), even though the Store itself doesn't exist yet. See this
     // class's doc comment.
-    auto *moreAvailable = new QPushButton(tr("More Available\u2026"), this);
-    moreAvailable->setObjectName("linkButton");
-    moreAvailable->setCursor(Qt::PointingHandCursor);
-    connect(moreAvailable, &QPushButton::clicked, this, &ScripturePanel::onMoreAvailableClicked);
+    m_moreAvailableButton = new QPushButton(tr("More Available\u2026"), this);
+    m_moreAvailableButton->setObjectName("linkButton");
+    m_moreAvailableButton->setCursor(Qt::PointingHandCursor);
 
     auto *column = new QWidget(this);
-    auto *layout = new QVBoxLayout(column);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(6);
-    layout->addWidget(header);
-    layout->addWidget(m_translationsList, /*stretch=*/1);
-    layout->addWidget(moreAvailable);
+    auto *columnLayout = new QVBoxLayout(column);
+    columnLayout->setContentsMargins(0, 0, 0, 0);
+    columnLayout->setSpacing(6);
+    columnLayout->addWidget(header);
+    columnLayout->addWidget(m_translationsList, /*stretch=*/1);
+    columnLayout->addWidget(m_moreAvailableButton);
     return column;
 }
 
@@ -308,28 +468,180 @@ QWidget *ScripturePanel::buildBottomBar()
     m_referenceCountLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
     auto *bar = new QWidget(this);
-    auto *layout = new QHBoxLayout(bar);
-    layout->setContentsMargins(4, 0, 4, 0);
-    layout->addWidget(settingsButton);
-    layout->addWidget(expandButton);
-    layout->addStretch(1);
-    layout->addWidget(m_referenceCountLabel);
+    auto *barLayout = new QHBoxLayout(bar);
+    barLayout->setContentsMargins(4, 0, 4, 0);
+    barLayout->addWidget(settingsButton);
+    barLayout->addWidget(expandButton);
+    barLayout->addStretch(1);
+    barLayout->addWidget(m_referenceCountLabel);
     return bar;
+}
+
+void ScripturePanel::setMode(SearchMode mode)
+{
+    if (m_mode == mode)
+        return;
+    m_mode = mode;
+
+    {
+        // Switching modes changes what the text in the box even means
+        // (a keyword query vs. a reference being built up) -- carrying
+        // it over would just be confusing, so start clean. Blocked so
+        // this reset doesn't itself trigger onSearchTextChanged() before
+        // the rest of this function has settled the model/UI state.
+        const QSignalBlocker blocker(m_searchEdit);
+        m_searchEdit->clear();
+    }
+    m_model->clearKeywordFilter();
+    rebuildSuggestionChips({});
+
+    if (mode == SearchMode::Words) {
+        m_searchEdit->setPlaceholderText(tr("Search words in the verse text\u2026"));
+        m_hintLabel->clear();
+    } else {
+        m_searchEdit->setPlaceholderText(tr("Book, chapter, verse\u2026 e.g. \u201cJohn 3:16\u201d"));
+        updateHintLabel(ScriptureReference::parse(QString()));
+    }
+
+    if (m_model->rowCount() > 0) {
+        m_table->selectRow(0);
+        m_table->scrollToTop();
+    }
+    refreshReferenceCount();
+    m_searchEdit->setFocus();
 }
 
 void ScripturePanel::onSearchTextChanged(const QString &text)
 {
-    // A jump-to search, not a filter: the table always shows every
-    // verse in the enabled translation(s) (matching the target design's
-    // "31,102 references" count staying put while "Genesis 1:1" sits in
-    // the search box) -- typing a reference or a word scrolls/selects
-    // the best match instead of hiding everything else.
-    const int row = m_model->findJumpRow(text);
-    if (row < 0)
+    if (m_mode == SearchMode::Words)
+        updateWordsMode(text);
+    else
+        updateReferenceMode(text);
+}
+
+void ScripturePanel::updateWordsMode(const QString &text)
+{
+    static const QRegularExpression whitespace(QStringLiteral("\\s+"));
+    const QStringList words = text.split(whitespace, Qt::SkipEmptyParts);
+    m_model->setKeywordFilter(words);
+    if (m_model->rowCount() > 0)
+        m_table->selectRow(0); // land on the first result, so Item Preview reflects the new search
+    refreshReferenceCount();
+}
+
+void ScripturePanel::updateReferenceMode(const QString &text)
+{
+    const ScriptureReference::Parsed parsed = ScriptureReference::parse(text);
+
+    if (m_model->isFiltering())
+        m_model->clearKeywordFilter(); // Reference mode always browses the full, unfiltered list
+
+    rebuildSuggestionChips(parsed.stage == ScriptureReference::Stage::Book
+                                ? ScriptureReference::bookSuggestions(parsed.bookQuery)
+                                : QVector<ScriptureReference::BookSuggestion>());
+    updateHintLabel(parsed);
+
+    if (parsed.valid)
+        applySelection(parsed.firstRow, parsed.lastRow);
+
+    refreshReferenceCount();
+}
+
+void ScripturePanel::updateHintLabel(const ScriptureReference::Parsed &parsed)
+{
+    using Stage = ScriptureReference::Stage;
+
+    if (!parsed.error.isEmpty()) {
+        m_hintLabel->setText(parsed.error);
+        m_hintLabel->setStyleSheet(QStringLiteral("color: %1;").arg(Theme::kAccentRed));
         return;
-    const QModelIndex index = m_model->index(row, ScriptureTableModel::ColumnReference);
-    m_table->setCurrentIndex(index);
-    m_table->scrollTo(index, QAbstractItemView::PositionAtCenter);
+    }
+    m_hintLabel->setStyleSheet(QString()); // back to the default muted "nextSlideLabel" color
+
+    switch (parsed.stage) {
+    case Stage::Book:
+        m_hintLabel->setText(parsed.bookAmbiguous
+                                  ? tr("Multiple books match \u2014 keep typing, or pick one below.")
+                                  : tr("Type a book name\u2026 e.g. \u201cJohn\u201d or \u201c1 Samuel\u201d"));
+        break;
+    case Stage::Chapter: {
+        int chapters = 0;
+        for (const ScriptureBookInfo &info : ScriptureLibrary::books()) {
+            if (info.name == parsed.book) {
+                chapters = info.chapterCount();
+                break;
+            }
+        }
+        m_hintLabel->setText(tr("%1 \u2014 enter a chapter (1\u2013%2)").arg(parsed.book).arg(chapters));
+        break;
+    }
+    case Stage::Verse: {
+        int maxVerse = 0;
+        for (const ScriptureBookInfo &info : ScriptureLibrary::books()) {
+            if (info.name == parsed.book) {
+                maxVerse = info.versesPerChapter.value(parsed.chapter - 1);
+                break;
+            }
+        }
+        m_hintLabel->setText(
+            tr("%1 %2 \u2014 enter a verse (1\u2013%3)").arg(parsed.book).arg(parsed.chapter).arg(maxVerse));
+        break;
+    }
+    case Stage::Range:
+        m_hintLabel->setText(parsed.endVerse > 0
+                                  ? tr("Range selected \u2014 press Enter to add, or keep typing to extend it.")
+                                  : tr("Verse selected \u2014 press Enter to add, or add \u201c-<verse>\u201d for a range."));
+        break;
+    }
+}
+
+void ScripturePanel::rebuildSuggestionChips(const QVector<ScriptureReference::BookSuggestion> &suggestions)
+{
+    QLayoutItem *child = nullptr;
+    while ((child = m_suggestionsLayout->takeAt(0)) != nullptr) {
+        delete child->widget();
+        delete child;
+    }
+
+    m_suggestionsRow->setVisible(!suggestions.isEmpty());
+    for (const ScriptureReference::BookSuggestion &suggestion : suggestions) {
+        auto *chip = new QPushButton(suggestion.name, this);
+        chip->setObjectName("suggestionChip");
+        chip->setCursor(Qt::PointingHandCursor);
+        const QString completedInput = suggestion.completedInput;
+        connect(chip, &QPushButton::clicked, this, [this, completedInput]() {
+            m_searchEdit->setText(completedInput);
+            m_searchEdit->setFocus();
+        });
+        m_suggestionsLayout->addWidget(chip);
+    }
+    m_suggestionsLayout->addStretch(1);
+}
+
+void ScripturePanel::applySelection(int firstSourceRow, int lastSourceRow)
+{
+    const int firstView = m_model->viewRowForSourceRow(firstSourceRow);
+    const int lastView = m_model->viewRowForSourceRow(lastSourceRow);
+    if (firstView < 0 || lastView < 0)
+        return;
+
+    const QModelIndex topLeft = m_model->index(firstView, 0);
+    const QModelIndex bottomRight = m_model->index(lastView, ScriptureTableModel::ColumnCount - 1);
+    m_table->selectionModel()->select(QItemSelection(topLeft, bottomRight),
+                                       QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    m_table->scrollTo(topLeft, QAbstractItemView::PositionAtCenter);
+    // Selecting triggers QItemSelectionModel::selectionChanged, already
+    // wired to emitForSelection(false) in the constructor -- no need to
+    // emit previewRequested() again here.
+}
+
+void ScripturePanel::onResetClicked()
+{
+    m_searchEdit->clear(); // synchronously runs onSearchTextChanged("") via whichever mode is active
+    if (m_model->rowCount() > 0) {
+        m_table->selectRow(0);
+        m_table->scrollToTop();
+    }
 }
 
 void ScripturePanel::onTranslationItemChanged(QListWidgetItem *item)
@@ -348,16 +660,32 @@ void ScripturePanel::onMoreAvailableClicked()
            "see the roadmap in README.md. For now, KJV is the only translation bundled with the app."));
 }
 
-void ScripturePanel::onRowClicked(const QModelIndex &index)
+void ScripturePanel::emitForSelection(bool activate)
 {
-    if (const ScriptureVerse *verse = m_model->verseAt(index.row()))
-        emit previewRequested(verse->reference, verse->text);
+    const QVector<int> rows = selectedSourceRowsSorted();
+    if (rows.isEmpty())
+        return;
+    QString reference;
+    QString text;
+    m_model->combinedReferenceAndText(rows, &reference, &text);
+    if (reference.isEmpty())
+        return;
+    if (activate)
+        emit scriptureActivated(reference, text);
+    else
+        emit previewRequested(reference, text);
 }
 
-void ScripturePanel::onRowActivated(const QModelIndex &index)
+QVector<int> ScripturePanel::selectedSourceRowsSorted() const
 {
-    if (const ScriptureVerse *verse = m_model->verseAt(index.row()))
-        emit scriptureActivated(verse->reference, verse->text);
+    QVector<int> rows;
+    const QModelIndexList selected = m_table->selectionModel()->selectedRows();
+    rows.reserve(selected.size());
+    for (const QModelIndex &index : selected)
+        rows.append(m_model->sourceRow(index.row()));
+    std::sort(rows.begin(), rows.end());
+    rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+    return rows;
 }
 
 void ScripturePanel::refreshReferenceCount()

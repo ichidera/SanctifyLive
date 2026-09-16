@@ -202,6 +202,34 @@ QString stylesheet()
         }
         QLineEdit:focus { border: 1px solid %6; }
 
+        /* Words/Reference search-mode toggle (Scriptures tab) */
+        QToolButton#modeToggleButton {
+            background-color: %5;
+            border: 1px solid %4;
+            border-radius: 6px;
+            padding: 5px 10px;
+            color: %9;
+        }
+        QToolButton#modeToggleButton:hover { background-color: %8; }
+        QToolButton#modeToggleButton:checked {
+            background-color: %6;
+            border-color: %6;
+            color: white;
+            font-weight: 600;
+        }
+
+        /* Reference-mode book suggestion chips (Scriptures tab) */
+        QPushButton#suggestionChip {
+            background-color: %5;
+            border: 1px solid %4;
+            border-radius: 12px;
+            padding: 3px 12px;
+            color: %2;
+            font-size: 12px;
+        }
+        QPushButton#suggestionChip:hover { background-color: %8; border-color: %6; }
+        QPushButton#suggestionChip:pressed { background-color: %6; color: white; }
+
         /* Text-only "link" style button (e.g. Scriptures' "More Available...") */
         QPushButton#linkButton {
             background: transparent;

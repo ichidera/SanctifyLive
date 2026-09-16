@@ -19,6 +19,19 @@ struct ScriptureVerse
                         // table.
 };
 
+// Per-book table of contents: how many chapters a book has, and how
+// many verses each of those chapters has -- exactly what the guided
+// Book -> Chapter -> Verse reference navigator (see
+// core/scripture/ScriptureReference) needs to reject "John 999" or
+// "John 3:99" without scanning the whole Bible on every keystroke.
+struct ScriptureBookInfo
+{
+    QString name;
+    int firstVerseRow = 0;         // row into verses() of this book's Chapter 1, Verse 1
+    QVector<int> versesPerChapter; // versesPerChapter[c-1] = verse count of chapter c
+    int chapterCount() const { return versesPerChapter.size(); }
+};
+
 // ScriptureLibrary loads and caches the one bundled translation (KJV
 // today -- see ui/ScripturePanel's doc comment for why only one ships
 // right now) from the Qt resource embedded at build time (see
@@ -42,5 +55,16 @@ QString translationCode();
 // embedded resource is somehow missing or malformed -- the Scriptures
 // tab should degrade to "no verses found", never crash the app.
 const QVector<ScriptureVerse> &verses();
+
+// The bundled translation's table of contents, derived from verses()
+// once and cached -- same "load once, reuse forever" reasoning.
+const QVector<ScriptureBookInfo> &books();
+
+// Exact-match lookup of a verse's row in verses(), or -1 if that
+// book/chapter/verse doesn't exist in the bundled translation. `book`
+// is matched case-insensitively against the canonical name (no alias
+// resolution here -- see core/scripture/ScriptureReference for
+// alias-aware book matching from free-typed input).
+int rowForReference(const QString &book, int chapter, int verse);
 
 } // namespace ScriptureLibrary

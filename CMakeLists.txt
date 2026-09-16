@@ -54,6 +54,8 @@ add_executable(SanctifyLive
 
     src/core/scripture/ScriptureLibrary.h
     src/core/scripture/ScriptureLibrary.cpp
+    src/core/scripture/ScriptureReference.h
+    src/core/scripture/ScriptureReference.cpp
 
     src/core/render/RenderResolution.h
     src/core/render/SlideRenderer.h

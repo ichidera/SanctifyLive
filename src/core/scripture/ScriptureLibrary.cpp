@@ -85,4 +85,51 @@ const QVector<ScriptureVerse> &verses()
     return cached;
 }
 
+const QVector<ScriptureBookInfo> &books()
+{
+    // Derived from verses() in a single linear pass -- verses() is
+    // already in canonical book/chapter order, so each book's
+    // chapter-count and per-chapter verse-count fall out just by
+    // noticing when the book or chapter name changes.
+    static const QVector<ScriptureBookInfo> cached = [] {
+        QVector<ScriptureBookInfo> result;
+        const QVector<ScriptureVerse> &all = verses();
+        for (int i = 0; i < all.size(); ++i) {
+            const ScriptureVerse &v = all.at(i);
+            if (result.isEmpty() || result.last().name != v.book) {
+                ScriptureBookInfo info;
+                info.name = v.book;
+                info.firstVerseRow = i;
+                result.append(info);
+            }
+            ScriptureBookInfo &current = result.last();
+            if (v.chapter > current.versesPerChapter.size())
+                current.versesPerChapter.resize(v.chapter, 0);
+            // Verses arrive in increasing order within a chapter, so the
+            // last one written for a given chapter is that chapter's
+            // true verse count.
+            current.versesPerChapter[v.chapter - 1] = v.verse;
+        }
+        return result;
+    }();
+    return cached;
+}
+
+int rowForReference(const QString &book, int chapter, int verse)
+{
+    for (const ScriptureBookInfo &info : books()) {
+        if (QString::compare(info.name, book, Qt::CaseInsensitive) != 0)
+            continue;
+        if (chapter < 1 || chapter > info.chapterCount())
+            return -1;
+        if (verse < 1 || verse > info.versesPerChapter.at(chapter - 1))
+            return -1;
+        int offset = 0;
+        for (int c = 0; c < chapter - 1; ++c)
+            offset += info.versesPerChapter.at(c);
+        return info.firstVerseRow + offset + (verse - 1);
+    }
+    return -1;
+}
+
 } // namespace ScriptureLibrary
