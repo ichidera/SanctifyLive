@@ -28,6 +28,7 @@
 #include "core/model/ScheduleModel.h"
 #include "core/render/RenderResolution.h"
 #include "core/render/SlideRenderer.h"
+#include "ui/LiveCaptionsPanel.h"
 #include "ui/MediaLibraryPanel.h"
 #include "ui/OutputWindow.h"
 #include "ui/SlideCanvas.h"
@@ -419,40 +420,25 @@ QWidget *OperatorWindow::buildHistoryPanel()
 
 QWidget *OperatorWindow::buildTranscriptionPanel()
 {
-    // Live speech-to-text isn't implemented yet -- there's no audio
-    // capture/transcription pipeline in the project at all (see README
-    // roadmap). This is an honest, disabled stub rather than a mock that
-    // pretends to transcribe, matching how Songs/Scriptures/Presentations/
-    // Themes are handled elsewhere in this window.
-    //
-    // Kept deliberately short: this column is the narrowest of the three
-    // in the Lower Area (see buildLowerArea()), so a longer message
-    // wraps to 4+ lines and gets clipped instead of just wrapping
-    // cleanly. The full explanation still lives in the tooltip and in
-    // README.md's roadmap for anyone who wants more than the headline.
-    auto *label = new QLabel(tr("Not implemented yet.\nSee README roadmap."), this);
-    label->setObjectName("nextSlideLabel");
-    label->setAlignment(Qt::AlignCenter);
-    label->setWordWrap(true);
-    // Top-aligned with a fixed top margin rather than vertically centered
-    // via stretches on both sides: centering stretches can squeeze a
-    // wrapping label below its natural height when this column ends up
-    // narrow, which made the lines overlap/clip instead of stacking
-    // cleanly. A fixed minimum height keeps that from happening even if
-    // the splitter briefly under-allocates space on first layout.
-    label->setMinimumHeight(48);
+    // The display itself is real now (see LiveCaptionsPanel) -- what's
+    // still missing is anything to feed it: there's no audio capture or
+    // speech-to-text engine anywhere in this project yet (see README
+    // roadmap). Start Transcription stays an honest disabled stub until
+    // that exists, matching how Songs/Scriptures/Presentations/Themes
+    // are handled elsewhere in this window; appendCaption() is ready
+    // for whenever a real pipeline lands.
+    m_liveCaptionsPanel = new LiveCaptionsPanel(this);
 
     auto *startButton = new QPushButton(tr("Start Transcription"), this);
     startButton->setEnabled(false);
     startButton->setToolTip(tr("Live transcription isn't implemented yet -- see the roadmap in README.md."));
 
     auto *wrapper = new QWidget(this);
-    wrapper->setMinimumHeight(110);
     auto *layout = new QVBoxLayout(wrapper);
-    layout->addSpacing(12);
-    layout->addWidget(label);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(6);
+    layout->addWidget(m_liveCaptionsPanel, /*stretch=*/1);
     layout->addWidget(startButton, 0, Qt::AlignCenter);
-    layout->addStretch(1);
     return wrapper;
 }
 

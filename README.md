@@ -33,7 +33,8 @@ Current milestone:
   transport), a main row of **Schedule / Preview / Live** panels side by
   side, and a bottom content strip (Songs / Scriptures / Media /
   Presentations / Themes tabs) alongside **History** (a log of what's
-  actually gone live) and **Transcription** (a placeholder for now).
+  actually gone live) and **Transcription** (a working live-captions
+  display with nothing feeding it yet — see below).
 - **Preview vs. Live** — clicking a Schedule row stages it in the Preview
   pane without touching the congregation-facing output; double-clicking
   it (or using keyboard shortcuts) commits it live. Schedule starts
@@ -121,7 +122,7 @@ summary, and that header as the source of truth if the two ever drift.
 | **Media panel** | The Media tab's own contents: folder tree + separate Images/Videos grids + bottom bar (add/settings/count/view). | `MediaLibraryPanel` |
 | **Item Preview** | Pixel-faithful render of whatever's selected/hovered in Content Tabs, *before* it's added to Schedule. A *library-content* preview — not the same thing as Preview above. | `OperatorWindow::buildItemPreviewPanel()`, `m_itemPreviewCanvas` |
 | **History** | Read-only, append-only, most-recent-first log of every slide that's actually gone live, timestamped. | `OperatorWindow::buildHistoryPanel()`, `m_historyList`, `ScheduleModel::history()` |
-| **Transcription** | Placeholder stub — no speech-to-text pipeline exists yet. | `OperatorWindow::buildTranscriptionPanel()` |
+| **Transcription** | A real, working scrolling live-captions display (`LiveCaptionsPanel`) — but nothing feeds it yet, since there's still no speech-to-text pipeline. | `OperatorWindow::buildTranscriptionPanel()`, `LiveCaptionsPanel` |
 | **Status Bar** | Bottom strip: output state + slide count, and the "Wake Display" button. | Built inline in `OperatorWindow`'s constructor |
 | **Output Window** | The actual, possibly-fullscreen, congregation-facing display (what a projector shows). | `OutputWindow`, `m_outputWindow` |
 

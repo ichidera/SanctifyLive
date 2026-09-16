@@ -161,6 +161,15 @@ QString stylesheet()
             color: %2;
         }
 
+        /* ---- Live captions display (Transcription panel) ---- */
+        QPlainTextEdit#liveCaptionsView {
+            background-color: %5;
+            color: %2;
+            border: 1px solid %4;
+            border-radius: 6px;
+            padding: 8px;
+        }
+
         /* ---- Media thumbnail tiles ---- */
         QFrame#mediaTile {
             background-color: %5;

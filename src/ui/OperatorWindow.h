@@ -15,6 +15,7 @@ class ScheduleModel;
 class OutputWindow;
 class SlideCanvas;
 class MediaLibraryPanel;
+class LiveCaptionsPanel;
 
 // =====================================================================
 // PANEL GLOSSARY -- read this before touching layout code.
@@ -92,9 +93,13 @@ class MediaLibraryPanel;
 //                       List widget: m_historyList. Built by
 //                       buildHistoryPanel().
 //     TRANSCRIPTION     Rightmost column, bottom half, below History.
-//                       Placeholder stub -- no audio/speech-to-text
-//                       pipeline exists yet (see README roadmap). Built
-//                       by buildTranscriptionPanel().
+//                       LiveCaptionsPanel (m_liveCaptionsPanel) is a
+//                       real, working scrolling caption display; what's
+//                       still missing is anything to feed it -- no
+//                       audio capture/speech-to-text pipeline exists
+//                       yet (see README roadmap), so Start Transcription
+//                       stays an honest disabled stub. Built by
+//                       buildTranscriptionPanel().
 //
 //   STATUS BAR        Bottom-of-window strip: output state + slide
 //                     count on the left, "Wake Display" button on the
@@ -195,4 +200,5 @@ private:
     QPushButton *m_goLiveButton;
 
     MediaLibraryPanel *m_mediaPanel;
+    LiveCaptionsPanel *m_liveCaptionsPanel; // TRANSCRIPTION panel: scrolling live-speech display
 };
