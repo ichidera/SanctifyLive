@@ -12,6 +12,7 @@
 #include <QVBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
@@ -28,12 +29,16 @@
 #include "core/model/ScheduleModel.h"
 #include "core/render/RenderResolution.h"
 #include "core/render/SlideRenderer.h"
+#include "core/scripture/ScriptureDetector.h"
 #include "ui/LiveCaptionsPanel.h"
+#include "ui/HardwareSetupDialog.h"
 #include "ui/MediaLibraryPanel.h"
 #include "ui/OutputWindow.h"
 #include "ui/ScripturePanel.h"
+#include "ui/SongsPanel.h"
 #include "ui/SlideCanvas.h"
 #include "ui/Theme.h"
+#include "ui/VerseDetectionPanel.h"
 
 OperatorWindow::OperatorWindow(QWidget *parent)
     : QMainWindow(parent), m_model(new ScheduleModel(this))
@@ -199,6 +204,15 @@ void OperatorWindow::buildMenuBar(QToolBar *toolBar)
     manageProfiles->setEnabled(false);
     manageProfiles->setToolTip(tr("Profiles aren't implemented yet -- see the roadmap in README.md."));
 
+    // Setup: real and working, unlike Profiles above -- see
+    // HardwareSetupDialog's doc comment for what it shows/edits and
+    // src/hardware/ for the detection behind it.
+    QMenu *setupMenu = bar->addMenu(tr("&Setup"));
+    connect(setupMenu->addAction(tr("&Hardware & Performance\u2026")), &QAction::triggered, this, [this]() {
+        HardwareSetupDialog dialog(this);
+        dialog.exec();
+    });
+
     QMenu *viewMenu = bar->addMenu(tr("&View"));
     connect(viewMenu->addAction(tr("&Wake Display")), &QAction::triggered,
             this, &OperatorWindow::onWakeDisplayClicked);
@@ -247,6 +261,13 @@ QWidget *OperatorWindow::buildMainRow()
     splitter->setStretchFactor(0, 1);
     splitter->setStretchFactor(1, 1);
     splitter->setStretchFactor(2, 1);
+    // See buildLowerArea()'s matching comment: without this, a narrow
+    // window can collapse Live (the one pane that must never silently
+    // disappear) to zero width.
+    splitter->setChildrenCollapsible(false);
+    splitter->widget(0)->setMinimumWidth(180);
+    splitter->widget(1)->setMinimumWidth(180);
+    splitter->widget(2)->setMinimumWidth(180);
     return splitter;
 }
 
@@ -285,12 +306,28 @@ QWidget *OperatorWindow::buildLowerArea()
     historyColumn->addWidget(wrapInPanelCard(tr("Transcription"), buildTranscriptionPanel()));
     historyColumn->setStretchFactor(0, 1);
     historyColumn->setStretchFactor(1, 1);
+    // A QSplitter can collapse a pane to zero height whenever its
+    // siblings' combined size-hint pressure exceeds the space available
+    // -- which is exactly what a real (non-1360x820) window size, a
+    // laptop's shorter screen, or someone dragging a splitter handle can
+    // trigger. That reads as "Transcription just isn't there" even
+    // though the panel is fully implemented; setChildrenCollapsible(false)
+    // plus a real minimum height on each pane (below) is what actually
+    // prevents it, not just picking generous initial sizes.
+    historyColumn->setChildrenCollapsible(false);
+    historyColumn->widget(0)->setMinimumHeight(80);
+    // Taller than History's minimum: Transcription now holds the
+    // transcript view, Start Transcription, the Simulate Caption
+    // testing control, and VerseDetectionPanel's results list -- all of
+    // which need to stay visible, not just avoid collapsing to zero,
+    // for the panel to be usable rather than merely present.
+    historyColumn->widget(1)->setMinimumHeight(260);
     // QSplitter only *honors* stretch factors on subsequent resizes; the
     // very first layout pass splits space roughly evenly regardless,
     // which can under-allocate a panel below its content's natural
     // height. Setting explicit initial sizes (History gets a bit more,
     // Transcription gets enough for its label + button) avoids that.
-    historyColumn->setSizes({220, 160});
+    historyColumn->setSizes({220, 320});
 
     auto *splitter = new QSplitter(this);
     splitter->addWidget(buildContentTabs());
@@ -299,6 +336,13 @@ QWidget *OperatorWindow::buildLowerArea()
     splitter->setStretchFactor(0, 3);
     splitter->setStretchFactor(1, 2);
     splitter->setStretchFactor(2, 1);
+    // Same collapse hazard as historyColumn above, this time hitting
+    // Item Preview or the whole History/Transcription column on a
+    // narrower window.
+    splitter->setChildrenCollapsible(false);
+    splitter->widget(0)->setMinimumWidth(240);
+    splitter->widget(1)->setMinimumWidth(180);
+    splitter->widget(2)->setMinimumWidth(180);
     // Same reasoning as historyColumn above: without explicit initial
     // sizes, QSplitter's first layout pass ignores stretch factors and
     // splits space roughly evenly, which doesn't match the intended
@@ -324,14 +368,17 @@ QTabWidget *OperatorWindow::buildContentTabs()
     };
 
     auto *tabs = new QTabWidget(this);
-    tabs->addTab(makePlaceholder(
-                     tr("No song library yet.\nSee the roadmap in README.md, or "
-                        "double-click a background in the Media tab to try Schedule.")),
-                 tr("Songs"));
+
+    m_songsPanel = new SongsPanel(this);
+    connect(m_songsPanel, &SongsPanel::sectionActivated, this, &OperatorWindow::onSongSectionActivated);
+    connect(m_songsPanel, &SongsPanel::previewRequested, this, &OperatorWindow::onSongPreviewRequested);
+    connect(m_songsPanel, &SongsPanel::wholeSongActivated, this, &OperatorWindow::onWholeSongActivated);
+    tabs->addTab(m_songsPanel, tr("Songs"));
 
     m_scripturePanel = new ScripturePanel(this);
     connect(m_scripturePanel, &ScripturePanel::scriptureActivated, this, &OperatorWindow::onScriptureActivated);
     connect(m_scripturePanel, &ScripturePanel::previewRequested, this, &OperatorWindow::onScripturePreviewRequested);
+    connect(m_scripturePanel, &ScripturePanel::previewCleared, this, &OperatorWindow::onScripturePreviewCleared);
     tabs->addTab(m_scripturePanel, tr("Scriptures"));
 
     m_mediaPanel = new MediaLibraryPanel(this);
@@ -436,12 +483,41 @@ QWidget *OperatorWindow::buildTranscriptionPanel()
     startButton->setEnabled(false);
     startButton->setToolTip(tr("Live transcription isn't implemented yet -- see the roadmap in README.md."));
 
+    // Testing aid, clearly labeled as such (not a real feature toggle
+    // like Start Transcription above): with no speech-to-text engine to
+    // actually listen to a service, this is the only way to exercise
+    // ScriptureDetector and VerseDetectionPanel below today. It feeds
+    // typed text through the exact same LiveCaptionsPanel::appendCaption()
+    // entry point a real STT pipeline would eventually call, so nothing
+    // about the detection path itself is a simulation -- only the
+    // source of the text is.
+    auto *simulateLabel = new QLabel(tr("Simulate a transcribed line (testing):"), this);
+    simulateLabel->setObjectName("nextSlideLabel");
+    m_simulateCaptionEdit = new QLineEdit(this);
+    m_simulateCaptionEdit->setPlaceholderText(tr("e.g. \u201cLet's turn to John chapter 3 verse 16\u201d"));
+
+    m_verseDetectionPanel = new VerseDetectionPanel(this);
+    // A detected verse is, once resolved, exactly the same "reference +
+    // text" shape a Scriptures-tab search result is -- reusing those
+    // slots directly (rather than writing near-duplicate ones) means
+    // detected verses preview and add to Schedule identically to
+    // hand-searched ones, with no separate code path to keep in sync.
+    connect(m_verseDetectionPanel, &VerseDetectionPanel::detectionPreviewRequested, this,
+            &OperatorWindow::onScripturePreviewRequested);
+    connect(m_verseDetectionPanel, &VerseDetectionPanel::detectionActivated, this,
+            &OperatorWindow::onScriptureActivated);
+
+    connect(m_simulateCaptionEdit, &QLineEdit::returnPressed, this, &OperatorWindow::onSimulateCaptionSubmitted);
+
     auto *wrapper = new QWidget(this);
     auto *layout = new QVBoxLayout(wrapper);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(6);
-    layout->addWidget(m_liveCaptionsPanel, /*stretch=*/1);
+    layout->addWidget(m_liveCaptionsPanel, /*stretch=*/2);
     layout->addWidget(startButton, 0, Qt::AlignCenter);
+    layout->addWidget(simulateLabel);
+    layout->addWidget(m_simulateCaptionEdit);
+    layout->addWidget(m_verseDetectionPanel, /*stretch=*/1);
     return wrapper;
 }
 
@@ -683,6 +759,71 @@ void OperatorWindow::onScripturePreviewRequested(const QString &reference, const
     const Slide previewSlide(reference, text);
     m_itemPreviewCanvas->setPixmap(SlideRenderer::render(&previewSlide, kDesignResolution));
     m_itemPreviewLabel->setText(reference);
+}
+
+void OperatorWindow::onScripturePreviewCleared()
+{
+    // A Words-mode search that matched nothing: reset to exactly the
+    // same placeholder state Item Preview starts in, rather than
+    // leaving whatever was previewed before the search visible next to
+    // a table that now shows no selection at all.
+    m_itemPreviewCanvas->setPixmap(SlideRenderer::render(nullptr, kDesignResolution));
+    m_itemPreviewLabel->setText(tr("Select an item to preview"));
+}
+
+void OperatorWindow::onSongSectionActivated(const QString &label, const QString &text)
+{
+    // One section (a single verse/chorus/bridge) added as one slide --
+    // same "modest, real bridge into the live schedule" as
+    // onScriptureActivated().
+    m_model->addSlide(Slide(label, text));
+}
+
+void OperatorWindow::onSongPreviewRequested(const QString &label, const QString &text)
+{
+    const Slide previewSlide(label, text);
+    m_itemPreviewCanvas->setPixmap(SlideRenderer::render(&previewSlide, kDesignResolution));
+    m_itemPreviewLabel->setText(label);
+}
+
+void OperatorWindow::onWholeSongActivated(const QStringList &labels, const QStringList &texts)
+{
+    // A whole song's running order, added as a sequence of slides in one
+    // action -- SongsPanel has already expanded any repeated chorus per
+    // the song's verseOrder, so this is just "add each one, in order".
+    // Q_ASSERT rather than silently truncating to the shorter list: the
+    // two are only ever built together in SongsPanel::onSongActivated(),
+    // so a mismatch would mean a real bug there, not a normal runtime
+    // condition to degrade gracefully around.
+    Q_ASSERT(labels.size() == texts.size());
+    const int count = qMin(labels.size(), texts.size());
+    for (int i = 0; i < count; ++i)
+        m_model->addSlide(Slide(labels.at(i), texts.at(i)));
+}
+
+void OperatorWindow::onSimulateCaptionSubmitted()
+{
+    const QString text = m_simulateCaptionEdit->text().trimmed();
+    if (text.isEmpty())
+        return;
+
+    // Feeds LiveCaptionsPanel through the exact same appendCaption() a
+    // real speech-to-text engine would eventually call -- see this
+    // function's declaration and buildTranscriptionPanel() for why this
+    // is labeled a testing aid rather than presented as real
+    // transcription.
+    m_liveCaptionsPanel->appendCaption(text);
+
+    // Defaults to KJV: OperatorWindow doesn't track which translation is
+    // currently active in the Scriptures tab (deliberately -- coupling
+    // this to ScripturePanel's internal selection for the sake of one
+    // default would cost more in cross-panel dependency than it's worth
+    // for now), and KJV is the app's own default translation everywhere
+    // else a translation isn't otherwise specified.
+    const QVector<ScriptureDetector::Detection> detections = ScriptureDetector::scan(QStringLiteral("KJV"), text);
+    m_verseDetectionPanel->showDetections(detections);
+
+    m_simulateCaptionEdit->clear();
 }
 
 // ---------------------------------------------------------------------

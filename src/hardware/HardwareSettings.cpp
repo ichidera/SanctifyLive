@@ -43,30 +43,11 @@ bool tierFromSettingsValue(const QString &value, HardwareTier *outTier)
     return false;
 }
 
-} // namespace
-
-HardwareTier currentTier()
+// Actually probes the machine, logs what it found, persists the result,
+// and returns the detected tier -- the one piece of work shared by
+// currentTier()'s first-run path and refreshDetection().
+HardwareTier detectLogAndPersist(QSettings &settings)
 {
-    QSettings settings;
-
-    HardwareTier overrideTier;
-    if (settings.value(kHasOverrideKey, false).toBool()
-        && tierFromSettingsValue(settings.value(kOverrideTierKey).toString(), &overrideTier)) {
-        qInfo().noquote() << QStringLiteral("SanctifyLive hardware tier: %1 (manual override)")
-                                  .arg(hardwareTierName(overrideTier));
-        return overrideTier;
-    }
-
-    HardwareTier persistedTier;
-    if (settings.contains(kDetectedTierKey)
-        && tierFromSettingsValue(settings.value(kDetectedTierKey).toString(), &persistedTier)) {
-        qInfo().noquote() << QStringLiteral("SanctifyLive hardware tier: %1 (from saved settings)")
-                                  .arg(hardwareTierName(persistedTier));
-        return persistedTier;
-    }
-
-    // First run, or the settings file was deleted/doesn't have this key
-    // yet: actually probe the machine.
     cachedProfile() = HardwareProbe::detect();
     const int scoreValue = TierScorer::score(cachedProfile());
     const HardwareTier detectedTier = TierScorer::tierForScore(scoreValue);
@@ -85,13 +66,113 @@ HardwareTier currentTier()
                                                          : QStringLiteral("unknown"))
                               .arg(scoreValue)
                               .arg(hardwareTierName(detectedTier));
-
     return detectedTier;
+}
+
+// Feature-override persistence keys. All six are written together by
+// setFeatureOverrides() and only ever read back as a complete set (see
+// that function's doc comment for why there's no partial/per-field
+// tracking).
+constexpr const char *kHasFeatureOverridesKey = "Hardware/Override/HasOverrides";
+constexpr const char *kMotionBackgroundsKey = "Hardware/Override/MotionBackgrounds";
+constexpr const char *kVideoCompositingKey = "Hardware/Override/VideoCompositing";
+constexpr const char *kFadeTransitionsKey = "Hardware/Override/FadeTransitions";
+constexpr const char *kFadeDurationMsKey = "Hardware/Override/FadeDurationMs";
+constexpr const char *kThumbnailWidthKey = "Hardware/Override/ThumbnailWidth";
+constexpr const char *kThumbnailHeightKey = "Hardware/Override/ThumbnailHeight";
+constexpr const char *kMaxOutputScreensKey = "Hardware/Override/MaxOutputScreens";
+constexpr const char *kAlphaKeyOutputKey = "Hardware/Override/AlphaKeyOutput";
+
+// currentPreset() is on a genuine hot path now: OutputWindow calls it on
+// every single slide change (see the fade-transition logic there), which
+// can happen many times a minute during a live service. Re-parsing
+// QSettings on every one of those calls is real, avoidable work for a
+// value that essentially never changes between explicit user actions
+// (opening HardwareSetupDialog and clicking Save/Reset, or an explicit
+// refreshDetection()) -- so it's cached here, and every function that
+// can actually change what currentPreset() should return
+// (setOverrideTier, clearOverride, setFeatureOverrides,
+// clearFeatureOverrides, refreshDetection) explicitly invalidates it.
+// There is no time-based expiry: correctness relies entirely on every
+// mutator remembering to invalidate, which is why the mutators all live
+// in this one file, next to the cache, rather than being spread out.
+struct PresetCache
+{
+    bool valid = false;
+    FeaturePreset preset;
+};
+PresetCache &presetCache()
+{
+    static PresetCache cache;
+    return cache;
+}
+void invalidatePresetCache()
+{
+    presetCache().valid = false;
+}
+
+} // namespace
+
+HardwareTier currentTier()
+{
+    QSettings settings;
+
+    HardwareTier overrideTier;
+    if (settings.value(kHasOverrideKey, false).toBool()
+        && tierFromSettingsValue(settings.value(kOverrideTierKey).toString(), &overrideTier)) {
+        return overrideTier;
+    }
+
+    HardwareTier persistedTier;
+    if (settings.contains(kDetectedTierKey)
+        && tierFromSettingsValue(settings.value(kDetectedTierKey).toString(), &persistedTier)) {
+        return persistedTier;
+    }
+
+    // First run, or the settings file was deleted/doesn't have this key
+    // yet: actually probe the machine. This is the only path that logs
+    // -- the two returns above happen on essentially every call once a
+    // tier is known (e.g. once per rendered frame's currentPreset()
+    // lookup), so logging there would spam the console for a value that
+    // hasn't changed; a real detection pass, in contrast, is rare (once
+    // per install, or an explicit refreshDetection()) and worth a
+    // permanent record of what was found.
+    return detectLogAndPersist(settings);
+}
+
+HardwareTier refreshDetection()
+{
+    QSettings settings;
+    const HardwareTier tier = detectLogAndPersist(settings);
+    invalidatePresetCache();
+    return tier;
 }
 
 FeaturePreset currentPreset()
 {
-    return featurePresetForTier(currentTier());
+    PresetCache &cache = presetCache();
+    if (cache.valid)
+        return cache.preset;
+
+    FeaturePreset preset;
+    if (hasFeatureOverrides()) {
+        QSettings settings;
+        preset.motionBackgrounds = settings.value(kMotionBackgroundsKey, false).toBool();
+        preset.videoCompositing = settings.value(kVideoCompositingKey, false).toBool();
+        preset.fadeTransitions = settings.value(kFadeTransitionsKey, false).toBool();
+        preset.fadeDurationMs = settings.value(kFadeDurationMsKey, 0).toInt();
+        const int thumbW = settings.value(kThumbnailWidthKey, 0).toInt();
+        const int thumbH = settings.value(kThumbnailHeightKey, 0).toInt();
+        preset.thumbnailResolution = (thumbW > 0 && thumbH > 0) ? QSize(thumbW, thumbH) : QSize();
+        preset.maxOutputScreens = qMax(1, settings.value(kMaxOutputScreensKey, 1).toInt());
+        preset.alphaKeyOutput = settings.value(kAlphaKeyOutputKey, false).toBool();
+    } else {
+        preset = featurePresetForTier(currentTier());
+    }
+
+    cache.preset = preset;
+    cache.valid = true;
+    return preset;
 }
 
 const HardwareProfile &lastDetectedProfile()
@@ -104,6 +185,7 @@ void setOverrideTier(HardwareTier tier)
     QSettings settings;
     settings.setValue(kHasOverrideKey, true);
     settings.setValue(kOverrideTierKey, hardwareTierName(tier));
+    invalidatePresetCache();
 }
 
 void clearOverride()
@@ -111,12 +193,41 @@ void clearOverride()
     QSettings settings;
     settings.setValue(kHasOverrideKey, false);
     settings.remove(kOverrideTierKey);
+    invalidatePresetCache();
 }
 
 bool hasOverride()
 {
     QSettings settings;
     return settings.value(kHasOverrideKey, false).toBool();
+}
+
+void setFeatureOverrides(const FeaturePreset &preset)
+{
+    QSettings settings;
+    settings.setValue(kHasFeatureOverridesKey, true);
+    settings.setValue(kMotionBackgroundsKey, preset.motionBackgrounds);
+    settings.setValue(kVideoCompositingKey, preset.videoCompositing);
+    settings.setValue(kFadeTransitionsKey, preset.fadeTransitions);
+    settings.setValue(kFadeDurationMsKey, preset.fadeDurationMs);
+    settings.setValue(kThumbnailWidthKey, preset.thumbnailResolution.width());
+    settings.setValue(kThumbnailHeightKey, preset.thumbnailResolution.height());
+    settings.setValue(kMaxOutputScreensKey, preset.maxOutputScreens);
+    settings.setValue(kAlphaKeyOutputKey, preset.alphaKeyOutput);
+    invalidatePresetCache();
+}
+
+void clearFeatureOverrides()
+{
+    QSettings settings;
+    settings.setValue(kHasFeatureOverridesKey, false);
+    invalidatePresetCache();
+}
+
+bool hasFeatureOverrides()
+{
+    QSettings settings;
+    return settings.value(kHasFeatureOverridesKey, false).toBool();
 }
 
 } // namespace HardwareSettings

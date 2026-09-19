@@ -26,28 +26,59 @@ namespace HardwareSettings
 // process -- later calls just read back the now-persisted value.
 HardwareTier currentTier();
 
-// The FeaturePreset for currentTier() -- what render/UI code should
-// actually consult, most of the time, rather than switching on the
-// tier enum directly.
+// Forces a fresh HardwareProbe::detect() + TierScorer, updates the
+// cached profile (see lastDetectedProfile()), and persists the new
+// detected tier -- unlike currentTier(), this never reads the
+// persisted/cached value first. A manual tier override (setOverrideTier
+// below), if one is set, is left untouched: re-detecting hardware
+// shouldn't silently discard an operator's explicit choice. Used by the
+// Setup screen's "Re-detect Hardware" action; ordinary startup should
+// use currentTier() instead, so a launch doesn't pay the detection cost
+// every single time.
+HardwareTier refreshDetection();
+
+// The FeaturePreset that render/UI code should actually consult, most
+// of the time, rather than switching on HardwareTier directly. Returns
+// the Setup screen's saved feature overrides if any are set (see
+// setFeatureOverrides() below), otherwise featurePresetForTier(currentTier()).
+// Cheap to call on a hot path (OutputWindow calls this on every slide
+// change) -- the result is cached internally and only recomputed when
+// one of this namespace's other functions actually changes what it
+// should return.
 FeaturePreset currentPreset();
 
-// The profile HardwareProbe::detect() found, if detection actually ran
-// this process (i.e. no tier was already persisted and no override is
-// set). Default-constructed (all-zero/empty) if currentTier() was
-// satisfied entirely from settings -- check openglAvailable/cpuCores
-// before trusting this for diagnostics, or just call
-// HardwareProbe::detect() directly if you need a fresh reading
-// regardless of what's cached.
+// The profile HardwareProbe::detect() found, if detection has run at
+// least once this process (either via currentTier()'s first-run path or
+// refreshDetection()). Default-constructed (all-zero/empty) if neither
+// has happened yet.
 const HardwareProfile &lastDetectedProfile();
 
 // Pins a specific tier regardless of what was/would be detected, and
 // persists the override immediately.
 void setOverrideTier(HardwareTier tier);
 
-// Removes a manual override, so currentTier() goes back to the
+// Removes a manual tier override, so currentTier() goes back to the
 // persisted (or freshly detected) value.
 void clearOverride();
 
 bool hasOverride();
+
+// Saves `preset` as the operator's explicit choice, taking over from
+// whatever featurePresetForTier(currentTier()) would otherwise say --
+// this is what the Setup screen calls when the operator reviews the
+// recommended features and clicks Save, whether or not they actually
+// changed anything from the recommendation. There's no per-field
+// override tracking: saving takes ownership of the whole preset, rather
+// than silently mixing tier defaults with one or two hand-picked
+// fields, which is far simpler to reason about (both here and for
+// whoever's reading the Setup screen's code) than a partial-merge
+// scheme would be.
+void setFeatureOverrides(const FeaturePreset &preset);
+
+// Discards any saved override, so currentPreset() goes back to
+// following the detected/pinned tier's recommendation automatically.
+void clearFeatureOverrides();
+
+bool hasFeatureOverrides();
 
 } // namespace HardwareSettings

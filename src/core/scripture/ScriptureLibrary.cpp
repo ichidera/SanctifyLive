@@ -6,34 +6,33 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QMap>
 
 namespace ScriptureLibrary
 {
 
 namespace
 {
-constexpr const char *kResourcePath = ":/scriptures/KJV.json";
-constexpr const char *kTranslationCode = "KJV";
 
-QVector<ScriptureVerse> loadFromResource()
+QVector<ScriptureVerse> loadFromResource(const QString &resourcePath)
 {
     QVector<ScriptureVerse> result;
 
-    QFile file(kResourcePath);
+    QFile file(resourcePath);
     if (!file.open(QIODevice::ReadOnly)) {
-        qWarning() << "ScriptureLibrary: couldn't open bundled resource" << kResourcePath;
+        qWarning() << "ScriptureLibrary: couldn't open bundled resource" << resourcePath;
         return result;
     }
 
     QJsonParseError parseError;
     const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
     if (doc.isNull()) {
-        qWarning() << "ScriptureLibrary: failed to parse" << kResourcePath << ":" << parseError.errorString();
+        qWarning() << "ScriptureLibrary: failed to parse" << resourcePath << ":" << parseError.errorString();
         return result;
     }
 
     const QJsonArray books = doc.object().value("books").toArray();
-    result.reserve(31200); // KJV has 31,102 verses; a little headroom avoids a mid-load reallocation.
+    result.reserve(31200); // every bundled translation has ~31,100 verses; a little headroom avoids a mid-load reallocation
 
     for (const QJsonValue &bookValue : books) {
         const QJsonObject bookObj = bookValue.toObject();
@@ -68,32 +67,77 @@ QVector<ScriptureVerse> loadFromResource()
     return result;
 }
 
+QString resourcePathFor(const QString &translationCode)
+{
+    for (const ScriptureTranslation &t : availableTranslations()) {
+        if (t.code == translationCode)
+            return QStringLiteral(":/scriptures/%1.json").arg(translationCode);
+    }
+    return QString(); // not a bundled translation
+}
+
+// Node-based (not contiguous-storage) associative container: inserting
+// a new key never moves or invalidates the QVector already stored under
+// a different key, which is what makes it safe for verses()/books()
+// below to hand back long-lived references into these caches rather
+// than copying a translation's full text on every call.
+QMap<QString, QVector<ScriptureVerse>> &verseCache()
+{
+    static QMap<QString, QVector<ScriptureVerse>> cache;
+    return cache;
+}
+
+QMap<QString, QVector<ScriptureBookInfo>> &bookInfoCache()
+{
+    static QMap<QString, QVector<ScriptureBookInfo>> cache;
+    return cache;
+}
+
 } // namespace
 
-QString translationCode()
+const QVector<ScriptureTranslation> &availableTranslations()
 {
-    return QString::fromLatin1(kTranslationCode);
+    // See this header's file-level comment for why exactly these four,
+    // and specifically why NIV/HCSB are not here.
+    static const QVector<ScriptureTranslation> table = {
+        {QStringLiteral("KJV"), QStringLiteral("King James Version (1769)"), QStringLiteral("en")},
+        {QStringLiteral("ASV"), QStringLiteral("American Standard Version (1901)"), QStringLiteral("en")},
+        {QStringLiteral("NHEB"), QStringLiteral("New Heart English Bible"), QStringLiteral("en")},
+        {QStringLiteral("RVA"), QStringLiteral("Reina-Valera Antigua (1909)"), QStringLiteral("es")},
+    };
+    return table;
 }
 
-const QVector<ScriptureVerse> &verses()
+const QVector<ScriptureVerse> &verses(const QString &translationCode)
 {
-    // Loaded once, on first use, and cached for the life of the
-    // process -- 31,000+ verses is cheap to hold in memory permanently
-    // but not something every ScripturePanel construction (or a future
-    // second window) should re-parse from JSON.
-    static const QVector<ScriptureVerse> cached = loadFromResource();
-    return cached;
+    QMap<QString, QVector<ScriptureVerse>> &cache = verseCache();
+    auto it = cache.find(translationCode);
+    if (it == cache.end()) {
+        const QString path = resourcePathFor(translationCode);
+        if (path.isEmpty())
+            qWarning() << "ScriptureLibrary: unknown translation code" << translationCode;
+        // Loaded once, on first use, and cached for the life of the
+        // process -- 31,000+ verses is cheap to hold in memory
+        // permanently but not something every ScripturePanel
+        // construction (or switching translations back and forth)
+        // should re-parse from JSON. Translations never selected are
+        // never loaded at all.
+        it = cache.insert(translationCode, path.isEmpty() ? QVector<ScriptureVerse>() : loadFromResource(path));
+    }
+    return it.value();
 }
 
-const QVector<ScriptureBookInfo> &books()
+const QVector<ScriptureBookInfo> &books(const QString &translationCode)
 {
-    // Derived from verses() in a single linear pass -- verses() is
-    // already in canonical book/chapter order, so each book's
-    // chapter-count and per-chapter verse-count fall out just by
-    // noticing when the book or chapter name changes.
-    static const QVector<ScriptureBookInfo> cached = [] {
+    QMap<QString, QVector<ScriptureBookInfo>> &cache = bookInfoCache();
+    auto it = cache.find(translationCode);
+    if (it == cache.end()) {
+        // Derived from verses() in a single linear pass -- verses() is
+        // already in canonical book/chapter order, so each book's
+        // chapter-count and per-chapter verse-count fall out just by
+        // noticing when the book or chapter name changes.
         QVector<ScriptureBookInfo> result;
-        const QVector<ScriptureVerse> &all = verses();
+        const QVector<ScriptureVerse> &all = verses(translationCode);
         for (int i = 0; i < all.size(); ++i) {
             const ScriptureVerse &v = all.at(i);
             if (result.isEmpty() || result.last().name != v.book) {
@@ -110,14 +154,14 @@ const QVector<ScriptureBookInfo> &books()
             // true verse count.
             current.versesPerChapter[v.chapter - 1] = v.verse;
         }
-        return result;
-    }();
-    return cached;
+        it = cache.insert(translationCode, result);
+    }
+    return it.value();
 }
 
-int rowForReference(const QString &book, int chapter, int verse)
+int rowForReference(const QString &translationCode, const QString &book, int chapter, int verse)
 {
-    for (const ScriptureBookInfo &info : books()) {
+    for (const ScriptureBookInfo &info : books(translationCode)) {
         if (QString::compare(info.name, book, Qt::CaseInsensitive) != 0)
             continue;
         if (chapter < 1 || chapter > info.chapterCount())

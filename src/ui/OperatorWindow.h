@@ -8,6 +8,7 @@ class QListWidgetItem;
 class QPushButton;
 class QToolButton;
 class QLabel;
+class QLineEdit;
 class QTabWidget;
 class QFrame;
 class QToolBar;
@@ -16,7 +17,9 @@ class OutputWindow;
 class SlideCanvas;
 class MediaLibraryPanel;
 class ScripturePanel;
+class SongsPanel;
 class LiveCaptionsPanel;
+class VerseDetectionPanel;
 
 // =====================================================================
 // PANEL GLOSSARY -- read this before touching layout code.
@@ -102,7 +105,21 @@ class LiveCaptionsPanel;
 //                       still missing is anything to feed it -- no
 //                       audio capture/speech-to-text pipeline exists
 //                       yet (see README roadmap), so Start Transcription
-//                       stays an honest disabled stub. Built by
+//                       stays an honest disabled stub. Below it,
+//                       VerseDetectionPanel (m_verseDetectionPanel) is
+//                       fully real and working: it shows whatever
+//                       core/scripture/ScriptureDetector found in the
+//                       most recent transcribed line, click to preview
+//                       or double-click to add -- the same detect-a-
+//                       spoken-reference-and-offer-to-project-it feature
+//                       tools like Pewbeam center their whole product
+//                       on. Since there's no live audio yet, a
+//                       "Simulate Caption" field (m_simulateCaptionEdit)
+//                       feeds it a typed test line through the exact
+//                       same LiveCaptionsPanel::appendCaption() path a
+//                       real STT engine would eventually call, so
+//                       detection is genuinely exercised today, not
+//                       just wired up for later. Built by
 //                       buildTranscriptionPanel().
 //
 //   STATUS BAR        Bottom-of-window strip: output state + slide
@@ -167,6 +184,11 @@ private slots:
     void onMediaPreviewRequested(const QString &name, const QColor &color, const QString &imagePath);
     void onScriptureActivated(const QString &reference, const QString &text);
     void onScripturePreviewRequested(const QString &reference, const QString &text);
+    void onScripturePreviewCleared();
+    void onSongSectionActivated(const QString &label, const QString &text);
+    void onSongPreviewRequested(const QString &label, const QString &text);
+    void onWholeSongActivated(const QStringList &labels, const QStringList &texts);
+    void onSimulateCaptionSubmitted();
 
 private:
     QToolBar *buildToolBar();
@@ -207,5 +229,8 @@ private:
 
     MediaLibraryPanel *m_mediaPanel;
     ScripturePanel *m_scripturePanel;
+    SongsPanel *m_songsPanel;
     LiveCaptionsPanel *m_liveCaptionsPanel; // TRANSCRIPTION panel: scrolling live-speech display
+    VerseDetectionPanel *m_verseDetectionPanel; // shows what ScriptureDetector found in the latest transcribed line
+    QLineEdit *m_simulateCaptionEdit; // testing aid -- see buildTranscriptionPanel()
 };

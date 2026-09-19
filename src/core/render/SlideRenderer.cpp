@@ -1,5 +1,6 @@
 #include "core/render/SlideRenderer.h"
 
+#include <QFontMetrics>
 #include <QPainter>
 #include <QPixmap>
 
@@ -7,6 +8,63 @@
 
 namespace SlideRenderer
 {
+
+namespace
+{
+
+// The largest pixel size (using `baseFont`'s family/weight) at which
+// `text`, word-wrapped, fits entirely inside `bounds` -- found by binary
+// search rather than any fixed fraction of the canvas. A one-line slide
+// title ("Beach Sunset") and an eight-verse combined reading need very
+// different sizes to both fill their box without overflowing it, and no
+// single formula based on resolution alone can tell which one it's
+// looking at without knowing how much text there actually is.
+//
+// QFontMetrics::boundingRect() runs the same word-wrap layout
+// drawText() will use, so "does it fit" here means exactly what it
+// means when actually painted -- this can't drift out of sync with the
+// real draw call the way a separately-maintained line-counting formula
+// could.
+int fittedFontPixelSize(const QFont &baseFont, const QString &text, const QRect &bounds)
+{
+    constexpr int kMinFontPixelSize = 12; // below this, text is unreadable on a projector regardless of fit
+
+    if (bounds.isEmpty() || text.isEmpty())
+        return kMinFontPixelSize;
+
+    // A single line can't be taller than the box it has to fit in, so
+    // the box's own height is the natural (not arbitrary) upper bound --
+    // no magic constant needed here.
+    const int maxFontPixelSize = qMax(kMinFontPixelSize, bounds.height());
+
+    auto fits = [&](int pixelSize) {
+        QFont candidate = baseFont;
+        candidate.setPixelSize(pixelSize);
+        const QFontMetrics metrics(candidate);
+        const QRect wrapped = metrics.boundingRect(bounds, Qt::TextWordWrap | Qt::AlignCenter, text);
+        return wrapped.height() <= bounds.height() && wrapped.width() <= bounds.width();
+    };
+
+    // Even the minimum size doesn't fully fit (an exceptionally long
+    // multi-verse selection): that's still the most readable option
+    // available, so use it rather than shrinking text past legibility
+    // to chase a fit that isn't achievable.
+    if (!fits(kMinFontPixelSize))
+        return kMinFontPixelSize;
+
+    int low = kMinFontPixelSize;
+    int high = maxFontPixelSize;
+    while (low < high) {
+        const int mid = low + (high - low + 1) / 2; // bias upward so this converges on the largest fitting size
+        if (fits(mid))
+            low = mid;
+        else
+            high = mid - 1;
+    }
+    return low;
+}
+
+} // namespace
 
 QPixmap render(const Slide *slide, const QSize &resolution)
 {
@@ -47,20 +105,21 @@ QPixmap render(const Slide *slide, const QSize &resolution)
     if (slide->text.isEmpty())
         return canvas;
 
-    // Font size and margins are proportions of the DESIGN resolution,
-    // never of a physical widget size -- that's what makes the frame
-    // identical on a 1080p monitor, a 720p projector, or a small preview
-    // thumbnail. The only thing that differs between those is how the
-    // resulting pixmap gets scaled afterwards (see OutputWindow).
+    // Margins are a proportion of the DESIGN resolution, never of a
+    // physical widget size -- that's what makes the frame identical on
+    // a 1080p monitor, a 720p projector, or a small preview thumbnail.
+    // The only thing that differs between those is how the resulting
+    // pixmap gets scaled afterwards (see OutputWindow).
+    const int marginX = resolution.width() / 24;
+    const int marginY = resolution.height() / 24;
+    const QRect textRect = canvas.rect().adjusted(marginX, marginY, -marginX, -marginY);
+
     QFont font = painter.font();
-    font.setPixelSize(qMax(12, resolution.height() / 8));
     font.setBold(true);
+    font.setPixelSize(fittedFontPixelSize(font, slide->text, textRect));
     painter.setFont(font);
 
     painter.setPen(Qt::white);
-    const int marginX = resolution.width() / 24;
-    const int marginY = resolution.height() / 24;
-    QRect textRect = canvas.rect().adjusted(marginX, marginY, -marginX, -marginY);
     painter.drawText(textRect, Qt::AlignCenter | Qt::TextWordWrap, slide->text);
 
     return canvas;

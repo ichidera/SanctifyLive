@@ -69,6 +69,15 @@ add_executable(SanctifyLive
     src/core/scripture/ScriptureLibrary.cpp
     src/core/scripture/ScriptureReference.h
     src/core/scripture/ScriptureReference.cpp
+    src/core/scripture/ScriptureDetector.h
+    src/core/scripture/ScriptureDetector.cpp
+
+    src/core/song/Song.h
+    src/core/song/Song.cpp
+    src/core/song/SongTextFormat.h
+    src/core/song/SongTextFormat.cpp
+    src/core/song/SongLibrary.h
+    src/core/song/SongLibrary.cpp
 
     src/core/render/RenderResolution.h
     src/core/render/SlideRenderer.h
@@ -90,8 +99,16 @@ add_executable(SanctifyLive
     src/ui/SlideCanvas.cpp
     src/ui/MediaLibraryPanel.h
     src/ui/MediaLibraryPanel.cpp
+    src/ui/HardwareSetupDialog.h
+    src/ui/HardwareSetupDialog.cpp
     src/ui/ScripturePanel.h
     src/ui/ScripturePanel.cpp
+    src/ui/SongsPanel.h
+    src/ui/SongsPanel.cpp
+    src/ui/SongEditorDialog.h
+    src/ui/SongEditorDialog.cpp
+    src/ui/VerseDetectionPanel.h
+    src/ui/VerseDetectionPanel.cpp
     src/ui/LiveCaptionsPanel.h
     src/ui/LiveCaptionsPanel.cpp
     src/ui/OutputWindow.h

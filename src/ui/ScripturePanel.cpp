@@ -4,9 +4,11 @@
 
 #include <QAbstractTableModel>
 #include <QButtonGroup>
+#include <QEvent>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QItemSelectionModel>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -23,9 +25,10 @@
 #include "ui/Theme.h"
 
 // ScriptureTableModel is a thin QAbstractTableModel wrapper around
-// ScriptureLibrary::verses() -- Translation / Reference / Scripture
-// columns, one row per verse. Deliberately NOT a QTableWidget populated
-// with 31,000+ QTableWidgetItems: a real model/view split is what keeps
+// ScriptureLibrary::verses(translationCode) -- Translation / Reference /
+// Scripture columns, one row per verse of whichever translation is
+// currently active. Deliberately NOT a QTableWidget populated with
+// 31,000+ QTableWidgetItems: a real model/view split is what keeps
 // scrolling responsive over a whole translation's text. Declared here
 // (matching ScripturePanel.h's forward declaration) rather than in an
 // unnamed namespace, since it needs no Q_OBJECT (no signals/slots/
@@ -37,9 +40,10 @@
 // deals in is a VIEW row into that filtered subset -- sourceRow()/
 // viewRowForSourceRow() are the two directions of translating between
 // a view row and the corresponding index into
-// ScriptureLibrary::verses() (the "source" row). When no filter is
-// active the two are identical, which is the common case (Reference
-// mode always browses the unfiltered list -- see ScripturePanel).
+// ScriptureLibrary::verses(translationCode) (the "source" row). When no
+// filter is active the two are identical, which is the common case
+// (Reference mode always browses the unfiltered list -- see
+// ScripturePanel).
 class ScriptureTableModel : public QAbstractTableModel
 {
 public:
@@ -53,23 +57,27 @@ public:
 
     explicit ScriptureTableModel(QObject *parent = nullptr) : QAbstractTableModel(parent) {}
 
-    // KJV is the only translation that actually has verses loaded (see
-    // ScriptureLibrary), so "enabled" is effectively "is the KJV
-    // checkbox checked" -- unchecking it empties the table rather than
-    // hiding rows one at a time, since there's nothing else to fall
-    // back to yet.
-    void setEnabled(bool enabled)
+    // Switches which bundled translation this model shows. A no-op
+    // (does NOT reset selection/filter state) if `code` is already
+    // active, so re-clicking the same translation in the list doesn't
+    // needlessly disturb the current view.
+    void setTranslation(const QString &code)
     {
-        if (enabled == m_enabled)
+        if (code == m_translationCode)
             return;
         beginResetModel();
-        m_enabled = enabled;
+        m_translationCode = code;
+        // A keyword filter's matches are translation-specific (the same
+        // verse can contain "shepherd" in KJV and not in another
+        // translation's wording of it) -- carrying it over across a
+        // translation switch would show stale, possibly-wrong results,
+        // so it's cleared rather than re-applied blindly.
+        m_filterWords.clear();
+        m_filteredRows.clear();
         endResetModel();
     }
+    const QString &translation() const { return m_translationCode; }
 
-    // words are ANDed together (case-insensitive substring match) --
-    // a verse must contain every word to match. An empty list clears
-    // filtering entirely (full, unfiltered translation).
     void setKeywordFilter(const QStringList &words)
     {
         beginResetModel();
@@ -82,9 +90,9 @@ public:
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override
     {
-        if (parent.isValid() || !m_enabled)
+        if (parent.isValid() || m_translationCode.isEmpty())
             return 0;
-        return isFiltering() ? m_filteredRows.size() : ScriptureLibrary::verses().size();
+        return isFiltering() ? m_filteredRows.size() : ScriptureLibrary::verses(m_translationCode).size();
     }
 
     int columnCount(const QModelIndex &parent = QModelIndex()) const override
@@ -101,7 +109,7 @@ public:
             return QVariant();
         switch (index.column()) {
         case ColumnTranslation:
-            return ScriptureLibrary::translationCode();
+            return m_translationCode;
         case ColumnReference:
             return verse->reference;
         case ColumnScripture:
@@ -128,28 +136,28 @@ public:
     }
 
     // Translates a view row (what the table/selection model deals in)
-    // to the corresponding row in ScriptureLibrary::verses(). -1 if out
-    // of range or nothing's enabled.
+    // to the corresponding row in ScriptureLibrary::verses(translation()).
+    // -1 if out of range or no translation is active.
     int sourceRow(int viewRow) const
     {
-        if (!m_enabled)
+        if (m_translationCode.isEmpty())
             return -1;
         if (!isFiltering())
-            return (viewRow >= 0 && viewRow < ScriptureLibrary::verses().size()) ? viewRow : -1;
+            return (viewRow >= 0 && viewRow < ScriptureLibrary::verses(m_translationCode).size()) ? viewRow : -1;
         if (viewRow < 0 || viewRow >= m_filteredRows.size())
             return -1;
         return m_filteredRows.at(viewRow);
     }
 
     // The inverse of sourceRow(): which view row (if any) currently
-    // shows the given ScriptureLibrary::verses() row. Used to select
-    // and scroll to a verse resolved by Reference-mode parsing.
+    // shows the given ScriptureLibrary verses() row. Used to select and
+    // scroll to a verse resolved by Reference-mode parsing.
     int viewRowForSourceRow(int sourceRow) const
     {
-        if (!m_enabled || sourceRow < 0)
+        if (m_translationCode.isEmpty() || sourceRow < 0)
             return -1;
         if (!isFiltering())
-            return sourceRow < ScriptureLibrary::verses().size() ? sourceRow : -1;
+            return sourceRow < ScriptureLibrary::verses(m_translationCode).size() ? sourceRow : -1;
         const auto it = std::lower_bound(m_filteredRows.begin(), m_filteredRows.end(), sourceRow);
         if (it == m_filteredRows.end() || *it != sourceRow)
             return -1;
@@ -162,7 +170,9 @@ public:
     const ScriptureVerse *verseAt(int viewRow) const
     {
         const int src = sourceRow(viewRow);
-        const QVector<ScriptureVerse> &all = ScriptureLibrary::verses();
+        if (m_translationCode.isEmpty())
+            return nullptr;
+        const QVector<ScriptureVerse> &all = ScriptureLibrary::verses(m_translationCode);
         if (src < 0 || src >= all.size())
             return nullptr;
         return &all.at(src);
@@ -174,18 +184,19 @@ public:
     // verses are selected" behavior. A single verse round-trips as
     // itself. Multiple verses are grouped into runs of Bible-consecutive
     // verses (same book, same chapter, verse numbers incrementing by
-    // exactly 1): a normal shift-click range comes out as "Esther
-    // 8:9-10"; a handful of unrelated Words-mode search hits still
-    // combine sensibly as "Esther 8:9; John 3:16" rather than silently
-    // pretending they're adjacent.
+    // exactly 1): a shift-click range comes out as "Esther 8:9-10"; a
+    // Ctrl-click set of non-adjacent verses (EasyWorship's "hold Ctrl,
+    // click each verse" workflow) still combines sensibly as "Esther
+    // 8:9; Esther 8:12" rather than silently pretending they're
+    // adjacent.
     void combinedReferenceAndText(const QVector<int> &sourceRows, QString *outReference, QString *outText) const
     {
         outReference->clear();
         outText->clear();
-        if (sourceRows.isEmpty())
+        if (sourceRows.isEmpty() || m_translationCode.isEmpty())
             return;
 
-        const QVector<ScriptureVerse> &all = ScriptureLibrary::verses();
+        const QVector<ScriptureVerse> &all = ScriptureLibrary::verses(m_translationCode);
         QVector<const ScriptureVerse *> selected;
         selected.reserve(sourceRows.size());
         for (int row : sourceRows) {
@@ -205,20 +216,35 @@ public:
         QStringList textParts;
         int runStart = 0;
         for (int i = 1; i <= selected.size(); ++i) {
+            // Row-adjacency (not "verse number + 1"), because rows are
+            // already in canonical Bible order within a translation:
+            // John 3:36 is immediately followed by John 4:1 in
+            // verses(), so this naturally treats a cross-chapter
+            // continuation ("John 3:16-4:2") as ONE run, not two --
+            // without needing special-cased "was that the last verse of
+            // its chapter" arithmetic. The book check still stops a run
+            // from silently bridging into the next book (Genesis 50:26
+            // is immediately followed by Exodus 1:1 in row terms, but
+            // "Genesis 50:20-Exodus 1:3" isn't a reference anyone
+            // writes).
             const bool continuesRun = i < selected.size() && selected.at(i)->book == selected.at(i - 1)->book
-                && selected.at(i)->chapter == selected.at(i - 1)->chapter
-                && selected.at(i)->verse == selected.at(i - 1)->verse + 1;
+                && sourceRows.at(i) == sourceRows.at(i - 1) + 1;
             if (continuesRun)
                 continue;
 
             const ScriptureVerse *first = selected.at(runStart);
             const ScriptureVerse *last = selected.at(i - 1);
-            referenceParts << (runStart == i - 1 ? first->reference
-                                                  : QStringLiteral("%1 %2:%3-%4")
-                                                        .arg(first->book)
-                                                        .arg(first->chapter)
-                                                        .arg(first->verse)
-                                                        .arg(last->verse));
+            if (runStart == i - 1)
+                referenceParts << first->reference;
+            else if (first->chapter == last->chapter)
+                referenceParts << QStringLiteral("%1 %2:%3-%4").arg(first->book).arg(first->chapter).arg(first->verse).arg(last->verse);
+            else
+                referenceParts << QStringLiteral("%1 %2:%3-%4:%5")
+                                      .arg(first->book)
+                                      .arg(first->chapter)
+                                      .arg(first->verse)
+                                      .arg(last->chapter)
+                                      .arg(last->verse);
             for (int j = runStart; j < i; ++j)
                 textParts << selected.at(j)->text;
             runStart = i;
@@ -231,10 +257,10 @@ private:
     void rebuildFilteredRows()
     {
         m_filteredRows.clear();
-        if (m_filterWords.isEmpty())
+        if (m_filterWords.isEmpty() || m_translationCode.isEmpty())
             return; // not filtering; rowCount()/sourceRow() use the full list directly
 
-        const QVector<ScriptureVerse> &all = ScriptureLibrary::verses();
+        const QVector<ScriptureVerse> &all = ScriptureLibrary::verses(m_translationCode);
         m_filteredRows.reserve(all.size() / 8); // rough guess; grows if needed
         for (int i = 0; i < all.size(); ++i) {
             bool matchesAll = true;
@@ -249,7 +275,7 @@ private:
         }
     }
 
-    bool m_enabled = true;
+    QString m_translationCode;
     QStringList m_filterWords;
     QVector<int> m_filteredRows; // sorted ascending -- built by a single forward pass over verses()
 };
@@ -257,6 +283,10 @@ private:
 ScripturePanel::ScripturePanel(QWidget *parent) : QWidget(parent)
 {
     m_model = new ScriptureTableModel(this);
+    m_activeTranslation = ScriptureLibrary::availableTranslations().isEmpty()
+        ? QString()
+        : ScriptureLibrary::availableTranslations().first().code; // "KJV" -- first in the bundled list
+    m_model->setTranslation(m_activeTranslation);
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -272,10 +302,15 @@ ScripturePanel::ScripturePanel(QWidget *parent) : QWidget(parent)
     m_table = new QTableView(this);
     m_table->setModel(m_model);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
-    // Contiguous, not Extended: a slide is a run of consecutive verses,
-    // so ctrl-click-style discontiguous multi-select isn't offered --
-    // shift-click/shift-arrow/drag to extend a single range instead.
-    m_table->setSelectionMode(QAbstractItemView::ContiguousSelection);
+    // Extended (not Contiguous): shift-click/shift-arrow/drag for a
+    // range, AND Ctrl-click to add non-adjacent verses -- matching
+    // EasyWorship's documented "hold Ctrl, click each verse" workflow
+    // for building a reading like Genesis 1:1,3,5.
+    // combinedReferenceAndText() (above) already groups whatever comes
+    // out of this into consecutive runs, so a discontiguous selection
+    // degrades gracefully rather than pretending the verses are
+    // adjacent.
+    m_table->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->verticalHeader()->setVisible(false);
     m_table->horizontalHeader()->setStretchLastSection(true);
@@ -300,10 +335,11 @@ ScripturePanel::ScripturePanel(QWidget *parent) : QWidget(parent)
 
     // All signal wiring is deliberately deferred to here, after every
     // widget involved exists. Several handlers (mode toggle, search
-    // text, reset) touch m_table/m_model/m_hintLabel, and Qt fires
-    // toggled()/textChanged() synchronously for the initial widget
-    // state set above and in the build*() calls -- connecting earlier
-    // would run those handlers before their dependencies exist.
+    // text, reset, translation change) touch m_table/m_model/
+    // m_hintLabel, and Qt fires toggled()/textChanged()/
+    // currentItemChanged() synchronously for the initial widget state
+    // set above and in the build*() calls -- connecting earlier would
+    // run those handlers before their dependencies exist.
     connect(m_wordsModeButton, &QToolButton::toggled, this, [this](bool checked) {
         if (checked)
             setMode(SearchMode::Words);
@@ -313,9 +349,24 @@ ScripturePanel::ScripturePanel(QWidget *parent) : QWidget(parent)
             setMode(SearchMode::Reference);
     });
     connect(m_searchEdit, &QLineEdit::textChanged, this, &ScripturePanel::onSearchTextChanged);
-    connect(m_searchEdit, &QLineEdit::returnPressed, this, [this]() { emitForSelection(/*activate=*/true); });
+    connect(m_searchEdit, &QLineEdit::returnPressed, this, [this]() {
+        // "Chapter resolved, no verse typed yet, operator just pressed
+        // Enter" defaults to that chapter's verse 1 rather than doing
+        // nothing -- informed by EasyWorship/FreeShow prior art on this
+        // exact gap.
+        if (m_mode == SearchMode::Reference) {
+            const ScriptureReference::Parsed parsed = ScriptureReference::parse(m_activeTranslation, m_searchEdit->text());
+            if (!parsed.valid && parsed.stage == ScriptureReference::Stage::Verse) {
+                const int firstRow = ScriptureLibrary::rowForReference(m_activeTranslation, parsed.book, parsed.chapter, 1);
+                if (firstRow >= 0)
+                    applySelection(firstRow, firstRow);
+            }
+        }
+        emitForSelection(/*activate=*/true);
+    });
+    m_searchEdit->installEventFilter(this); // Tab accepts the first suggestion chip, see eventFilter()
     connect(m_resetButton, &QToolButton::clicked, this, &ScripturePanel::onResetClicked);
-    connect(m_translationsList, &QListWidget::itemChanged, this, &ScripturePanel::onTranslationItemChanged);
+    connect(m_translationsList, &QListWidget::currentItemChanged, this, &ScripturePanel::onTranslationRowChanged);
     connect(m_moreAvailableButton, &QPushButton::clicked, this, &ScripturePanel::onMoreAvailableClicked);
     connect(m_table->selectionModel(), &QItemSelectionModel::selectionChanged, this,
             [this](const QItemSelection &, const QItemSelection &) { emitForSelection(/*activate=*/false); });
@@ -323,7 +374,7 @@ ScripturePanel::ScripturePanel(QWidget *parent) : QWidget(parent)
     connect(m_table, &QTableView::doubleClicked, this,
             [this](const QModelIndex &) { emitForSelection(/*activate=*/true); });
 
-    updateHintLabel(ScriptureReference::parse(m_searchEdit->text()));
+    updateHintLabel(ScriptureReference::parse(m_activeTranslation, m_searchEdit->text()));
     refreshReferenceCount();
 }
 
@@ -399,39 +450,25 @@ QWidget *ScripturePanel::buildTranslationsColumn()
     auto *header = new QLabel(tr("SCRIPTURES"), this);
     header->setObjectName("panelTitle");
 
-    // A checkable list, not three separate QCheckBoxes: this matches
-    // the target design's look (a selectable row per translation, KJV
-    // highlighted as "current") and gets the existing QListWidget
-    // selection styling (Theme.cpp) for free. Only KJV is actually
-    // backed by data (see ScriptureLibrary) -- HCSB and RVA are shown,
-    // per the target design, but disabled: there's no Store yet to
-    // fetch them from (see README roadmap), so letting an operator
-    // "check" one that silently shows no verses would be worse than not
-    // listing it at all.
+    // Single-select, not checkboxes: matches EasyWorship's Resource
+    // Library ("select a version from the list on the left" -- one
+    // translation is "current" at a time). All four listed here are
+    // real, fully bundled, and clickable -- no greyed-out placeholders.
     m_translationsList = new QListWidget(this);
     m_translationsList->setSelectionMode(QAbstractItemView::SingleSelection);
     m_translationsList->setFixedWidth(120);
 
-    auto addTranslation = [this](const QString &code, bool available) {
-        auto *item = new QListWidgetItem(code, m_translationsList);
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-        item->setCheckState(available ? Qt::Checked : Qt::Unchecked);
-        if (!available) {
-            item->setFlags(item->flags() & ~Qt::ItemIsEnabled);
-            item->setToolTip(tr("Not installed yet -- see \u201cMore Available\u2026\u201d below."));
-        }
-        return item;
-    };
-
-    m_kjvItem = addTranslation(tr("KJV"), /*available=*/true);
-    addTranslation(tr("HCSB"), /*available=*/false);
-    addTranslation(tr("RVA"), /*available=*/false);
-    m_translationsList->setCurrentItem(m_kjvItem);
+    for (const ScriptureTranslation &t : ScriptureLibrary::availableTranslations()) {
+        auto *item = new QListWidgetItem(t.code, m_translationsList);
+        item->setToolTip(t.displayName);
+        item->setData(Qt::UserRole, t.code);
+        if (t.code == m_activeTranslation)
+            m_translationsList->setCurrentItem(item);
+    }
 
     // A real link, not a disabled stub: clicking it is honest about
-    // what it does today (explain where more translations will come
-    // from), even though the Store itself doesn't exist yet. See this
-    // class's doc comment.
+    // what it does today (explain where licensed translations like NIV
+    // would come from), even though the Store itself doesn't exist yet.
     m_moreAvailableButton = new QPushButton(tr("More Available\u2026"), this);
     m_moreAvailableButton->setObjectName("linkButton");
     m_moreAvailableButton->setCursor(Qt::PointingHandCursor);
@@ -500,7 +537,7 @@ void ScripturePanel::setMode(SearchMode mode)
         m_hintLabel->clear();
     } else {
         m_searchEdit->setPlaceholderText(tr("Book, chapter, verse\u2026 e.g. \u201cJohn 3:16\u201d"));
-        updateHintLabel(ScriptureReference::parse(QString()));
+        updateHintLabel(ScriptureReference::parse(m_activeTranslation, QString()));
     }
 
     if (m_model->rowCount() > 0) {
@@ -509,6 +546,22 @@ void ScripturePanel::setMode(SearchMode mode)
     }
     refreshReferenceCount();
     m_searchEdit->setFocus();
+}
+
+void ScripturePanel::setActiveTranslation(const QString &code)
+{
+    if (code == m_activeTranslation || code.isEmpty())
+        return;
+    m_activeTranslation = code;
+    m_model->setTranslation(code);
+
+    // Re-run whatever search was active against the new translation,
+    // rather than just clearing it -- switching from KJV to RVA while
+    // looking at John 3 should still be looking at John 3, in RVA.
+    onSearchTextChanged(m_searchEdit->text());
+    if (m_model->rowCount() > 0 && !m_table->selectionModel()->hasSelection())
+        m_table->selectRow(0);
+    refreshReferenceCount();
 }
 
 void ScripturePanel::onSearchTextChanged(const QString &text)
@@ -524,14 +577,22 @@ void ScripturePanel::updateWordsMode(const QString &text)
     static const QRegularExpression whitespace(QStringLiteral("\\s+"));
     const QStringList words = text.split(whitespace, Qt::SkipEmptyParts);
     m_model->setKeywordFilter(words);
-    if (m_model->rowCount() > 0)
+    if (m_model->rowCount() > 0) {
         m_table->selectRow(0); // land on the first result, so Item Preview reflects the new search
+    } else {
+        // Nothing matched: clear the table's selection so it visibly
+        // shows nothing highlighted, and tell OperatorWindow to drop
+        // whatever was previewed before this search rather than leaving
+        // stale content displayed next to an empty results table.
+        m_table->clearSelection();
+        emit previewCleared();
+    }
     refreshReferenceCount();
 }
 
 void ScripturePanel::updateReferenceMode(const QString &text)
 {
-    const ScriptureReference::Parsed parsed = ScriptureReference::parse(text);
+    const ScriptureReference::Parsed parsed = ScriptureReference::parse(m_activeTranslation, text);
 
     if (m_model->isFiltering())
         m_model->clearKeywordFilter(); // Reference mode always browses the full, unfiltered list
@@ -561,12 +622,12 @@ void ScripturePanel::updateHintLabel(const ScriptureReference::Parsed &parsed)
     switch (parsed.stage) {
     case Stage::Book:
         m_hintLabel->setText(parsed.bookAmbiguous
-                                  ? tr("Multiple books match \u2014 keep typing, or pick one below.")
+                                  ? tr("Multiple books match \u2014 keep typing, or pick one below (Tab accepts the first).")
                                   : tr("Type a book name\u2026 e.g. \u201cJohn\u201d or \u201c1 Samuel\u201d"));
         break;
     case Stage::Chapter: {
         int chapters = 0;
-        for (const ScriptureBookInfo &info : ScriptureLibrary::books()) {
+        for (const ScriptureBookInfo &info : ScriptureLibrary::books(m_activeTranslation)) {
             if (info.name == parsed.book) {
                 chapters = info.chapterCount();
                 break;
@@ -577,14 +638,16 @@ void ScripturePanel::updateHintLabel(const ScriptureReference::Parsed &parsed)
     }
     case Stage::Verse: {
         int maxVerse = 0;
-        for (const ScriptureBookInfo &info : ScriptureLibrary::books()) {
+        for (const ScriptureBookInfo &info : ScriptureLibrary::books(m_activeTranslation)) {
             if (info.name == parsed.book) {
                 maxVerse = info.versesPerChapter.value(parsed.chapter - 1);
                 break;
             }
         }
-        m_hintLabel->setText(
-            tr("%1 %2 \u2014 enter a verse (1\u2013%3)").arg(parsed.book).arg(parsed.chapter).arg(maxVerse));
+        m_hintLabel->setText(tr("%1 %2 \u2014 enter a verse (1\u2013%3), or press Enter for verse 1")
+                                  .arg(parsed.book)
+                                  .arg(parsed.chapter)
+                                  .arg(maxVerse));
         break;
     }
     case Stage::Range:
@@ -603,6 +666,7 @@ void ScripturePanel::rebuildSuggestionChips(const QVector<ScriptureReference::Bo
         delete child;
     }
 
+    m_firstSuggestionCompletion = suggestions.isEmpty() ? QString() : suggestions.first().completedInput;
     m_suggestionsRow->setVisible(!suggestions.isEmpty());
     for (const ScriptureReference::BookSuggestion &suggestion : suggestions) {
         auto *chip = new QPushButton(suggestion.name, this);
@@ -629,6 +693,14 @@ void ScripturePanel::applySelection(int firstSourceRow, int lastSourceRow)
     const QModelIndex bottomRight = m_model->index(lastView, ScriptureTableModel::ColumnCount - 1);
     m_table->selectionModel()->select(QItemSelection(topLeft, bottomRight),
                                        QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    // select() alone does NOT move the selection model's "current"
+    // index (a distinct concept from "selected", used for keyboard
+    // navigation) -- without this, the row is highlighted correctly but
+    // currentIndex() still reports the previous row (or none), which
+    // matters both for Shift-arrow extending from the right place and
+    // for anything checking "is a selection active" via currentIndex()
+    // rather than hasSelection().
+    m_table->selectionModel()->setCurrentIndex(topLeft, QItemSelectionModel::Current);
     m_table->scrollTo(topLeft, QAbstractItemView::PositionAtCenter);
     // Selecting triggers QItemSelectionModel::selectionChanged, already
     // wired to emitForSelection(false) in the constructor -- no need to
@@ -644,20 +716,22 @@ void ScripturePanel::onResetClicked()
     }
 }
 
-void ScripturePanel::onTranslationItemChanged(QListWidgetItem *item)
+void ScripturePanel::onTranslationRowChanged()
 {
-    if (item != m_kjvItem)
-        return; // HCSB/RVA rows are disabled and can't actually be toggled by the user
-    m_model->setEnabled(item->checkState() == Qt::Checked);
-    refreshReferenceCount();
+    const QListWidgetItem *item = m_translationsList->currentItem();
+    if (!item)
+        return;
+    setActiveTranslation(item->data(Qt::UserRole).toString());
 }
 
 void ScripturePanel::onMoreAvailableClicked()
 {
     QMessageBox::information(
         this, tr("More Translations"),
-        tr("Additional translations will be available from the SanctifyLive Store once it's built -- "
-           "see the roadmap in README.md. For now, KJV is the only translation bundled with the app."));
+        tr("KJV, ASV, NHEB, and RVA are bundled with SanctifyLive because they're all in the public domain. "
+           "Translations like NIV or CSB require a paid licence from their publisher and aren't something an "
+           "app can simply bundle -- those will need a Store, once one exists, to fetch under the right "
+           "licence terms. See the roadmap in README.md."));
 }
 
 void ScripturePanel::emitForSelection(bool activate)
@@ -693,4 +767,24 @@ void ScripturePanel::refreshReferenceCount()
     const int count = m_model->rowCount();
     m_referenceCountLabel->setText(
         tr("%1 %2").arg(QLocale().toString(count), count == 1 ? tr("reference") : tr("references")));
+}
+
+bool ScripturePanel::eventFilter(QObject *watched, QEvent *event)
+{
+    // Tab, in Reference mode, with a book suggestion showing: accept the
+    // first suggestion, the same way Tab/Right-arrow accepts an inline
+    // autocomplete suggestion in a browser address bar. This is the
+    // keyboard-only path to the same thing clicking a suggestion chip
+    // does -- without it, the chips would be mouse-only, which doesn't
+    // fit an app operators run during a live, often one-handed,
+    // service.
+    if (watched == m_searchEdit && event->type() == QEvent::KeyPress) {
+        auto *keyEvent = static_cast<QKeyEvent *>(event);
+        if (keyEvent->key() == Qt::Key_Tab && m_mode == SearchMode::Reference
+            && !m_firstSuggestionCompletion.isEmpty()) {
+            m_searchEdit->setText(m_firstSuggestionCompletion);
+            return true; // consumed -- don't let focus move to the next widget
+        }
+    }
+    return QWidget::eventFilter(watched, event);
 }

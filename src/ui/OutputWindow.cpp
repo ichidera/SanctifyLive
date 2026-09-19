@@ -2,10 +2,12 @@
 
 #include <QPainter>
 #include <QPaintEvent>
+#include <QVariantAnimation>
 
 #include "core/model/ScheduleModel.h"
 #include "core/render/RenderResolution.h"
 #include "core/render/SlideRenderer.h"
+#include "hardware/HardwareSettings.h"
 
 OutputWindow::OutputWindow(ScheduleModel *model, QWidget *parent)
     : QWidget(parent), m_model(model)
@@ -26,6 +28,17 @@ OutputWindow::OutputWindow(ScheduleModel *model, QWidget *parent)
     setAutoFillBackground(true);
     setPalette(pal);
 
+    m_fadeAnimation = new QVariantAnimation(this);
+    connect(m_fadeAnimation, &QVariantAnimation::valueChanged, this, [this](const QVariant &value) {
+        m_fadeProgress = value.toReal();
+        update();
+    });
+    // Once the target frame is fully shown, the previous one is no
+    // longer needed for painting -- dropping it frees the memory rather
+    // than holding an extra full-resolution pixmap alive indefinitely
+    // between transitions.
+    connect(m_fadeAnimation, &QVariantAnimation::finished, this, [this]() { m_previousCanvas = QPixmap(); });
+
     connect(m_model, &ScheduleModel::liveContentChanged,
             this, &OutputWindow::onLiveContentChanged);
 
@@ -44,7 +57,31 @@ void OutputWindow::onLiveContentChanged()
     // the window (dragging it, moving it to a different projector,
     // shrinking it to a preview thumbnail) triggers Qt resize/paint
     // events, NOT this slot, so it can never cause a re-render.
-    m_canvas = SlideRenderer::render(m_model->currentSlide(), kDesignResolution);
+    const Slide *newSlide = m_model->currentSlide();
+    const QPixmap newCanvas = SlideRenderer::render(newSlide, kDesignResolution);
+    const FeaturePreset preset = HardwareSettings::currentPreset();
+
+    // A crossfade needs something real on both ends: a previous frame to
+    // fade FROM (m_canvas starts null, so the very first frame never
+    // fades in from nothing) and a real slide to fade TO (a blackout
+    // always cuts instantly -- see this class's doc comment for why).
+    const bool canFade =
+        preset.fadeTransitions && preset.fadeDurationMs > 0 && !m_canvas.isNull() && newSlide != nullptr;
+
+    m_fadeAnimation->stop();
+    if (canFade) {
+        m_previousCanvas = m_canvas;
+        m_canvas = newCanvas;
+        m_fadeProgress = 0.0;
+        m_fadeAnimation->setDuration(preset.fadeDurationMs);
+        m_fadeAnimation->setStartValue(0.0);
+        m_fadeAnimation->setEndValue(1.0);
+        m_fadeAnimation->start();
+    } else {
+        m_canvas = newCanvas;
+        m_fadeProgress = 1.0;
+        m_previousCanvas = QPixmap();
+    }
     update(); // schedule a repaint; Qt coalesces repeated calls automatically
 }
 
@@ -74,5 +111,16 @@ void OutputWindow::paintEvent(QPaintEvent *event)
     QRect targetRect(QPoint(0, 0), scaledSize);
     targetRect.moveCenter(rect().center());
 
-    painter.drawPixmap(targetRect, m_canvas);
+    if (m_fadeProgress < 1.0 && !m_previousCanvas.isNull()) {
+        // Mid-crossfade: the outgoing frame underneath, the incoming
+        // frame on top at increasing opacity. Both pixmaps share the
+        // same design resolution (kDesignResolution never changes mid-
+        // session), so the same targetRect is correct for both.
+        painter.drawPixmap(targetRect, m_previousCanvas);
+        painter.setOpacity(m_fadeProgress);
+        painter.drawPixmap(targetRect, m_canvas);
+        painter.setOpacity(1.0);
+    } else {
+        painter.drawPixmap(targetRect, m_canvas);
+    }
 }

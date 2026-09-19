@@ -3,6 +3,7 @@
 #include <QPixmap>
 #include <QWidget>
 
+class QVariantAnimation;
 class ScheduleModel;
 
 // OutputWindow is what actually gets projected/displayed to the
@@ -43,6 +44,20 @@ class ScheduleModel;
 // outside this file, since everything else only talks to ScheduleModel,
 // and the design-resolution/scale-to-physical contract is unaffected by
 // what draws the canvas.
+//
+// TRANSITIONS: when HardwareSettings::currentPreset().fadeTransitions is
+// on (see src/hardware/ and ui/HardwareSetupDialog), changing from one
+// real slide to another crossfades over fadeDurationMs instead of
+// cutting instantly -- the one feature this hardware-tier system
+// actually gates today, chosen because it's the most visible, lowest-
+// risk way to prove the tier recommendation means something rather than
+// being a settings screen that edits values nothing reads. Deliberately
+// NOT applied when the new or previous frame is a blackout (a null
+// Slide): a "cut to black" action should stay an immediate, unambiguous
+// cut regardless of the fade setting, the same reasoning ProPresenter/
+// EasyWorship's own Black button follows -- an operator hitting that
+// button in an emergency shouldn't watch it ease out over half a
+// second.
 class OutputWindow : public QWidget
 {
     Q_OBJECT
@@ -64,4 +79,17 @@ private:
     // directly. Re-rendered exactly once per liveContentChanged signal,
     // never on resize.
     QPixmap m_canvas;
+
+    // The frame being faded FROM; only meaningful while m_fadeProgress <
+    // 1.0. Left null when no crossfade is in progress, so paintEvent's
+    // "am I mid-fade" check is just "is this non-null" rather than a
+    // separate bool to keep in sync.
+    QPixmap m_previousCanvas;
+
+    // 0.0 = paintEvent shows only m_previousCanvas; 1.0 = shows only
+    // m_canvas; in between, both are drawn with m_canvas at this opacity
+    // over m_previousCanvas underneath. Driven by m_fadeAnimation.
+    qreal m_fadeProgress = 1.0;
+
+    QVariantAnimation *m_fadeAnimation = nullptr; // owned; parented to this
 };

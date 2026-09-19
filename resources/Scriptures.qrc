@@ -1,19 +1,30 @@
 <!--
-    Embeds the bundled Scripture translation(s) into the executable
+    Embeds every bundled Scripture translation into the executable
     itself (AUTORCC, already enabled in CMakeLists.txt), rather than
-    reading Scriptures/KJV.json off disk at a path relative to the
-    working directory or install location. Unlike Media tab imports
+    reading files off disk at a path relative to the working directory
+    or install location. Unlike Media tab imports
     (core/storage/MediaLibraryStore), which deliberately reference
     external files the operator picked, Scripture text is bundled
     content the app ships with; it should load identically no matter
     how or from where SanctifyLive was launched.
 
-    Only KJV ships today (see ui/ScripturePanel's doc comment for why);
-    more translations arrive as their own resource entries once a real
-    Store exists to deliver them (see README roadmap).
+    All four are in the public domain in the United States; see
+    core/scripture/ScriptureLibrary.h for the translation table and
+    each one's source/licence note. Notably absent: NIV and HCSB/CSB.
+    Both are actively copyrighted (Biblica/Zondervan and Holman Bible
+    Publishers, respectively) and require a paid licence to redistribute
+    even a single verse at scale; see the licence note in
+    ScriptureLibrary.h before ever adding a translation here.
+
+    More translations arrive as their own resource entries, either
+    more public-domain texts, or a licensed one once a real Store exists
+    to deliver it (see README roadmap).
 -->
 <RCC>
     <qresource prefix="/scriptures">
         <file alias="KJV.json">../Scriptures/KJV.json</file>
+        <file alias="ASV.json">../Scriptures/ASV.json</file>
+        <file alias="NHEB.json">../Scriptures/NHEB.json</file>
+        <file alias="RVA.json">../Scriptures/RVA.json</file>
     </qresource>
 </RCC>
